@@ -213,14 +213,20 @@ python -c "import flash_attn_interface; print('FA3 OK')"
 
 ### Honest stack: what actually moves the needle
 
-| Change | Validated speedup vs 17.6 min baseline | Risk |
-|---|---|---|
-| `vram_buffer_gb` from 4 to 12 | **measured: 16.6 min (~6%)** — within noise | n/a (no-op) |
-| `compile_dit = True` (BF16, no FP8) | expected 12-14 min (20-30%) | first-step compile cost; LoRA-swap re-compiles |
-| Install Flash Attention 3 | expected 11-12 min (30-40%) | none |
-| FP8 quantization (when stable) | expected 10-13 min (30-40%) on top of FA3 | quanto hangs on some configs; LoRA excluded from quant |
-| Stacked: FA3 + compile + FP8 (when stable) | **target: 4-6 min** (~3× total) | composite of above |
-| `cfg_scale=1.0` (RGB-conditioned only) | further 2× on top of stack → ~3 min | mild quality cost |
+All numbers below are measured on the same workflow (R2AIN, 480×640×21f, 20 steps, BF16, RTX 5090) unless marked *expected*.
+
+| Change | Wall time | Per-step | Δ vs baseline | Notes |
+|---|---|---|---|---|
+| **Baseline** (defaults) | 17.6 min | ~43.8 s | — | Includes ~3 min cold-load |
+| `vram_buffer_gb` 4 → 12 | 16.6 min | ~43 s | **–6% (noise)** | Widget is a no-op on current diffsynth |
+| `compile_dit = True` | **14.55 min** | **~31.6 s** | **–17% wall, –28% per-step** | First-step pays ~90 s compile capture |
+| Install Flash Attention 3 | *expected ~12-13 min* | *~28-30 s* | *–25-30%* | Auto-picked over FA2; install once |
+| `compile_dit` + FA3 (stacked) | *expected ~10 min* | *~22 s* | *–43%* | Independent multipliers stack |
+| FP8 quant (when stable) | *expected ~9-11 min* | *~20-25 s* | *–35-50%* | Quanto+LoRA combo hung in our test |
+| Full stack (compile + FA3 + FP8) | *target ~6-8 min* | *~15-18 s* | *–60-70%* | Three independent wins |
+| `cfg_scale = 1.0` (RGB-conditioned only) | *further 2× on top* | *halved* | *additional –50%* | Single forward per step instead of two; mild quality cost |
+
+**For longer runs the compile win dominates further** — at 50 steps the ~90 s compile overhead amortizes to ~1.8 s/step, making the ~28% per-step gain show up as ~25% wall reduction. Compile is unambiguously worth it for any run over ~15 steps.
 
 The README previously claimed ~30 sec/step with VRAM management; that number was true under an older diffsynth version that exposed `enable_vram_management(vram_buffer=...)` on `WanVideoPipeline`. The current diffsynth removed that API — our runtime call is `hasattr`-guarded and silently no-ops, which is why the per-step is now ~43 sec rather than ~30 sec. The right fix is FA3 + compile, not the (now-cosmetic) vram_buffer knob.
 
