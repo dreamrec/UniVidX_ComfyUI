@@ -1,0 +1,19 @@
+# UniVidX runtime deps. ComfyUI core ships torch/torchvision; these are floors only.
+# torch>=2.7 is required for NVIDIA Blackwell (sm_120, RTX 5090). Older builds error
+# at first kernel launch with "no kernel image is available for execution on the device."
+torch>=2.7
+torchvision>=0.22
+transformers>=4.38
+imageio[ffmpeg]>=2.31
+safetensors>=0.4
+einops>=0.7
+sentencepiece>=0.1.99
+protobuf>=3.20
+modelscope>=1.13
+ftfy>=6.1
+pandas>=2.0
+accelerate>=0.27
+peft>=0.10
+datasets>=2.14
+huggingface_hub>=0.20
+diffsynth>=2.0
