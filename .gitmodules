@@ -1,0 +1,3 @@
+[submodule "vendor/UniVidX"]
+	path = vendor/UniVidX
+	url = https://github.com/houyuanchen111/UniVidX.git
