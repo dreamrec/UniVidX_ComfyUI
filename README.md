@@ -13,6 +13,26 @@ ComfyUI custom nodes for [UniVidX](https://houyuanchen111.github.io/UniVidX.gith
 
 This is a **Strategy A** wrapper: UniVidX's official pipeline runs as an opaque black box; the four output IMAGE batches become standard ComfyUI tensors that flow into any downstream node — VHS video combine, alpha compositing, 3D reconstruction, ControlNet conditioning for *other* models, you name it.
 
+## Visual Tour
+
+### The flagship workflow — `t2RAIN`, text-to-all-four-modalities
+
+![t2RAIN workflow](assets/workflow_t2RAIN.png)
+
+Five nodes. One text prompt in. Four physically-distinct video modalities out — generated in a single denoising loop, not four separate models. Thumbnails are real frame-11 outputs from a 21-frame 480×640 run on an RTX 5090 (~10 min wall time).
+
+### Intrinsic decomposition — RGB / Albedo / Irradiance / Normal
+
+![Intrinsic quad](assets/results/intrinsic_quad.jpg)
+
+The RGB is the full-shaded composite. Albedo is the lighting-removed surface color. Irradiance is the geometry-free incoming light field. Normal encodes surface direction as XYZ→RGB. All four are temporally consistent across the 21-frame clip.
+
+### Alpha decomposition — Composite / Matte / Foreground / Background
+
+![Alpha quad](assets/results/alpha_quad.jpg)
+
+The matte is a true binary-quality mask, not a heatmap visualization. `R2PFB` mode (RGB-conditioned) gives the cleanest mattes; text-only `t2RPFB` tends to produce a near-uniform white matte because the model can't decompose without a reference frame.
+
 ## Features
 
 - **Two model variants** with shared Wan2.1-T2V-14B base: `intrinsic` (RGB / Albedo / Irradiance / Normal) and `alpha` (RGB / Pha / Fgr / Bgr).
@@ -179,15 +199,55 @@ Wan2.1's text encoder was trained heavily on Chinese. **English prompts work but
 
 ## Node Overview
 
-Five nodes, all under the `UniVidX` category:
+Five nodes, all under the `UniVidX` category. Custom socket types — `UNIVIDX_MODEL` (purple), `UNIVIDX_TASK` (teal), `UNIVIDX_RESULT` (pink) — keep the graph type-safe; standard `IMAGE` (green) is used everywhere a frame batch flows.
 
-| Node | What it does |
-|------|------|
-| **UniVidX • Load Model** | Loads `intrinsic` or `alpha` variant; outputs `UNIVIDX_MODEL`. Cached per `(variant, dtype, device)` so multi-graph runs reuse weights. |
-| **UniVidX • Task Mode** | Picks one of the 30 modes from a dropdown; outputs `UNIVIDX_TASK` and validates against the loaded model's family. |
-| **UniVidX • Sample** | Runs UniVidX's `pipe()`. Accepts up to 7 optional IMAGE inputs (one per modality across both families); ignores the ones not required by the active mode. |
-| **UniVidX • Decode (Intrinsic)** | Splays the result into RGB / Albedo / Irradiance / Normal IMAGE batches. Black-fills any modality that was a condition rather than a target. |
-| **UniVidX • Decode (Alpha)** | Same but for Composite / Alpha / Foreground / Background. |
+<table>
+<tr><td width="380">
+
+![Loader](assets/nodes/loader.svg)
+
+</td><td>
+
+**`UniVidXLoader`** — Loads the `intrinsic` or `alpha` variant and outputs `UNIVIDX_MODEL`. Models are cached per `(variant, dtype, device)` so multi-graph runs reuse weights instead of re-loading the 28 GB DiT.
+
+</td></tr>
+<tr><td>
+
+![Task Mode](assets/nodes/task_mode.svg)
+
+</td><td>
+
+**`UniVidXTaskMode`** — Picks one of 30 modes from a dropdown (`t2RAIN`, `R2AIN`, `RA2IN`, `t2RPFB`, …). Outputs `UNIVIDX_TASK` carrying the mode + family. The sampler validates the family against the loaded model variant.
+
+</td></tr>
+<tr><td>
+
+![Sampler](assets/nodes/sampler.svg)
+
+</td><td>
+
+**`UniVidXSampler`** — Runs UniVidX's `pipe()` end-to-end inside a `chdir(vendor/UniVidX)` context. Accepts the model + task + a text prompt + up to 7 optional `IMAGE` inputs (one per modality across both families). Inputs not required by the active mode are silently ignored.
+
+</td></tr>
+<tr><td>
+
+![Decode Intrinsic](assets/nodes/decode_intrinsic.svg)
+
+</td><td>
+
+**`UniVidXDecodeIntrinsic`** — Splays an intrinsic-family `UNIVIDX_RESULT` into 4 `IMAGE` batches: `rgb / albedo / irradiance / normal`. Modalities that were *conditions* (not targets) come back as a black placeholder of the right shape, so downstream graphs never break on missing slots.
+
+</td></tr>
+<tr><td>
+
+![Decode Alpha](assets/nodes/decode_alpha.svg)
+
+</td><td>
+
+**`UniVidXDecodeAlpha`** — Same shape as above but for the alpha family: `composite_rgb / alpha / foreground / background`. Raises `ValueError` if you try to feed it an intrinsic-family result (and vice versa).
+
+</td></tr>
+</table>
 
 ## Requirements
 

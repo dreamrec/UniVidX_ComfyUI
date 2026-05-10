@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 170" role="img" aria-label="UniVidX Decode Intrinsic node">
+  <defs>
+    <linearGradient id="title4" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#22c55e"/><stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#262534"/><stop offset="100%" stop-color="#1c1b27"/>
+    </linearGradient>
+    <style>.t{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;fill:#e8e8f0}
+      .lbl{font-family:-apple-system,'Segoe UI',sans-serif;font-size:13px;font-weight:600;fill:#fff}
+      .ttl{font-family:-apple-system,'Segoe UI',sans-serif;font-size:14px;font-weight:700;fill:#fff;letter-spacing:0.3px}</style>
+  </defs>
+  <rect x="2" y="2" width="336" height="166" rx="8" fill="url(#body)" stroke="#444357" stroke-width="1.5"/>
+  <rect x="2" y="2" width="336" height="28" rx="8" fill="url(#title4)"/>
+  <rect x="2" y="22" width="336" height="8" fill="url(#title4)"/>
+  <text x="14" y="21" class="ttl">Decode Intrinsic</text>
+  <text x="320" y="21" text-anchor="end" class="t" fill="#bbf7d0">UNIVIDX</text>
+
+  <g font-family="-apple-system,'Segoe UI',sans-serif" font-size="13" font-weight="600">
+    <circle cx="8" cy="50" r="5" fill="#ec4899" stroke="#1c1b27" stroke-width="1.5"/>
+    <text x="20" y="54" fill="#fbcfe8">result</text>
+  </g>
+
+  <g font-family="-apple-system,'Segoe UI',sans-serif" font-size="13" font-weight="600">
+    <text x="318" y="84" text-anchor="end" fill="#86efac">rgb</text>
+    <circle cx="332" cy="80" r="5" fill="#56dd56" stroke="#1c1b27" stroke-width="1.5"/>
+    <text x="318" y="106" text-anchor="end" fill="#86efac">albedo</text>
+    <circle cx="332" cy="102" r="5" fill="#56dd56" stroke="#1c1b27" stroke-width="1.5"/>
+    <text x="318" y="128" text-anchor="end" fill="#86efac">irradiance</text>
+    <circle cx="332" cy="124" r="5" fill="#56dd56" stroke="#1c1b27" stroke-width="1.5"/>
+    <text x="318" y="150" text-anchor="end" fill="#86efac">normal</text>
+    <circle cx="332" cy="146" r="5" fill="#56dd56" stroke="#1c1b27" stroke-width="1.5"/>
+  </g>
+</svg>

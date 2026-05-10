@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 140" role="img" aria-label="UniVidX Loader node">
+  <defs>
+    <linearGradient id="title" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#262534"/><stop offset="100%" stop-color="#1c1b27"/>
+    </linearGradient>
+    <linearGradient id="widget" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b3a4d"/><stop offset="100%" stop-color="#2e2d3e"/>
+    </linearGradient>
+    <style>.t{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;fill:#e8e8f0}
+      .lbl{font-family:-apple-system,'Segoe UI',sans-serif;font-size:13px;font-weight:600;fill:#fff}
+      .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;fill:#a7f3d0}
+      .ttl{font-family:-apple-system,'Segoe UI',sans-serif;font-size:14px;font-weight:700;fill:#fff;letter-spacing:0.3px}</style>
+  </defs>
+  <rect x="2" y="2" width="336" height="136" rx="8" fill="url(#body)" stroke="#444357" stroke-width="1.5"/>
+  <rect x="2" y="2" width="336" height="28" rx="8" fill="url(#title)"/>
+  <rect x="2" y="22" width="336" height="8" fill="url(#title)"/>
+  <text x="14" y="21" class="ttl">UniVidX Loader</text>
+  <text x="320" y="21" text-anchor="end" class="t" fill="#e9d5ff">UNIVIDX</text>
+
+  <g transform="translate(0,42)">
+    <text x="14" y="11" class="t" fill="#9ca3af">variant</text>
+    <rect x="80" y="0" width="170" height="18" rx="3" fill="url(#widget)" stroke="#52516a" stroke-width="0.7"/>
+    <text x="88" y="13" class="v">intrinsic</text>
+    <polygon points="240,7 246,7 243,12" fill="#9ca3af"/>
+  </g>
+
+  <g transform="translate(0,68)">
+    <text x="14" y="11" class="t" fill="#9ca3af">dtype</text>
+    <rect x="80" y="0" width="170" height="18" rx="3" fill="url(#widget)" stroke="#52516a" stroke-width="0.7"/>
+    <text x="88" y="13" class="v">bfloat16</text>
+    <polygon points="240,7 246,7 243,12" fill="#9ca3af"/>
+  </g>
+
+  <g transform="translate(0,108)">
+    <text x="318" y="5" text-anchor="end" class="lbl" fill="#c4b5fd">model</text>
+    <circle cx="332" cy="0" r="5" fill="#a855f7" stroke="#1c1b27" stroke-width="1.5"/>
+  </g>
+</svg>
