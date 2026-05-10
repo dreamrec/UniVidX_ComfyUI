@@ -18,14 +18,14 @@ pair of group rects. The script fails loudly if any overlap is found.
 
 Outputs (UI-format JSONs that drag-and-drop into ComfyUI's canvas):
     examples/t2RAIN_basic.json       (text -> RGB+A+I+N, intrinsic)
-    examples/R2AIN_basic.json        (RGB -> A+I+N, intrinsic)
     examples/t2RPFB_basic.json       (text -> R+P+F+B, alpha)
-    examples/R2PFB_basic.json        (RGB -> P+F+B, alpha)
     examples/I_video_output.json     (t2RAIN -> 4x VHS_VideoCombine MP4)
     examples/J_alpha_compositing.json (R2PFB matte -> ImageCompositeMasked over cyan)
 
 The matching API-format JSONs (suffixed `_api.json`) are auto-derived for
-programmatic queueing.
+programmatic queueing. Video-conditioned workflows
+(R2AIN_video_api.json / R2PFB_video_api.json) are generated separately
+by `_build_video_workflows.py`.
 """
 from __future__ import annotations
 
@@ -407,46 +407,6 @@ def workflow_t2RAIN_basic() -> dict:
                     name="UniVidX • t2RAIN (text -> RGB/A/I/N)")
 
 
-def workflow_R2AIN_basic() -> dict:
-    setup = GroupSpec("Model Setup", COLOR_SETUP, [
-        make_node("UniVidXLoader",   "loader", ["intrinsic", "bfloat16"]),
-        make_node("UniVidXTaskMode", "task",   ["R2AIN"]),
-    ])
-    cond = GroupSpec("RGB Conditioning", COLOR_INPUT, [
-        make_node("LoadImage",        "load_rgb",   ["unividx_R2AIN_input.png", "image"]),
-        make_node("RepeatImageBatch", "repeat_rgb", [21]),
-    ])
-    sampling = GroupSpec("Sampling", COLOR_SAMPLE, [
-        make_node("UniVidXSampler", "sampler", sampler_widgets()),
-    ])
-    decode = GroupSpec("Decode (Intrinsic)", COLOR_DECODE, [
-        make_node("UniVidXDecodeIntrinsic", "decoder", []),
-    ])
-    outputs = GroupSpec("Outputs", COLOR_OUTPUT, [
-        make_node("SaveImage", "save_rgb",        ["unividx_R2AIN_rgb_placeholder"]),
-        make_node("SaveImage", "save_albedo",     ["unividx_R2AIN_albedo"]),
-        make_node("SaveImage", "save_irradiance", ["unividx_R2AIN_irradiance"]),
-        make_node("SaveImage", "save_normal",     ["unividx_R2AIN_normal"]),
-    ])
-    groups = [setup, cond, sampling, decode, outputs]
-    nodes, placed_groups = layout(groups)
-    # Sampler's `rgb` input is at slot 2 (after model[0], task[1])
-    links = assemble_links(nodes, [
-        ("loader",     0, "sampler",    0, "UNIVIDX_MODEL"),
-        ("task",       0, "sampler",    1, "UNIVIDX_TASK"),
-        ("load_rgb",   0, "repeat_rgb", 0, "IMAGE"),
-        ("repeat_rgb", 0, "sampler",    2, "IMAGE"),
-        ("sampler",    0, "decoder",    0, "UNIVIDX_RESULT"),
-        ("decoder",    0, "save_rgb",        0, "IMAGE"),
-        ("decoder",    1, "save_albedo",     0, "IMAGE"),
-        ("decoder",    2, "save_irradiance", 0, "IMAGE"),
-        ("decoder",    3, "save_normal",     0, "IMAGE"),
-    ])
-    validate_no_overlap(nodes, placed_groups)
-    return finalize(nodes, placed_groups, links,
-                    name="UniVidX • R2AIN (RGB -> A/I/N)")
-
-
 def workflow_t2RPFB_basic() -> dict:
     setup = GroupSpec("Model Setup", COLOR_SETUP, [
         make_node("UniVidXLoader",   "loader", ["alpha", "bfloat16"]),
@@ -479,46 +439,6 @@ def workflow_t2RPFB_basic() -> dict:
     validate_no_overlap(nodes, placed_groups)
     return finalize(nodes, placed_groups, links,
                     name="UniVidX • t2RPFB (text -> R/P/F/B)")
-
-
-def workflow_R2PFB_basic() -> dict:
-    setup = GroupSpec("Model Setup", COLOR_SETUP, [
-        make_node("UniVidXLoader",   "loader", ["alpha", "bfloat16"]),
-        make_node("UniVidXTaskMode", "task",   ["R2PFB"]),
-    ])
-    cond = GroupSpec("RGB Conditioning", COLOR_INPUT, [
-        make_node("LoadImage",        "load_rgb",   ["unividx_R2AIN_input.png", "image"]),
-        make_node("RepeatImageBatch", "repeat_rgb", [21]),
-    ])
-    sampling = GroupSpec("Sampling", COLOR_SAMPLE, [
-        make_node("UniVidXSampler", "sampler",
-                  sampler_widgets(height=432, width=768)),
-    ])
-    decode = GroupSpec("Decode (Alpha)", COLOR_DECODE, [
-        make_node("UniVidXDecodeAlpha", "decoder", []),
-    ])
-    outputs = GroupSpec("Outputs", COLOR_OUTPUT, [
-        make_node("SaveImage", "save_composite", ["unividx_R2PFB_composite_placeholder"]),
-        make_node("SaveImage", "save_alpha",     ["unividx_R2PFB_alpha_matte"]),
-        make_node("SaveImage", "save_fgr",       ["unividx_R2PFB_foreground"]),
-        make_node("SaveImage", "save_bgr",       ["unividx_R2PFB_background"]),
-    ])
-    groups = [setup, cond, sampling, decode, outputs]
-    nodes, placed_groups = layout(groups)
-    links = assemble_links(nodes, [
-        ("loader",     0, "sampler",    0, "UNIVIDX_MODEL"),
-        ("task",       0, "sampler",    1, "UNIVIDX_TASK"),
-        ("load_rgb",   0, "repeat_rgb", 0, "IMAGE"),
-        ("repeat_rgb", 0, "sampler",    2, "IMAGE"),
-        ("sampler",    0, "decoder",    0, "UNIVIDX_RESULT"),
-        ("decoder",    0, "save_composite", 0, "IMAGE"),
-        ("decoder",    1, "save_alpha",     0, "IMAGE"),
-        ("decoder",    2, "save_fgr",       0, "IMAGE"),
-        ("decoder",    3, "save_bgr",       0, "IMAGE"),
-    ])
-    validate_no_overlap(nodes, placed_groups)
-    return finalize(nodes, placed_groups, links,
-                    name="UniVidX • R2PFB (RGB -> Pha/Fgr/Bgr)")
 
 
 def workflow_I_video_output() -> dict:
@@ -659,9 +579,7 @@ def finalize(nodes: list[Node], groups: list[Group],
 
 DEMOS = {
     "t2RAIN_basic":         workflow_t2RAIN_basic,
-    "R2AIN_basic":          workflow_R2AIN_basic,
     "t2RPFB_basic":         workflow_t2RPFB_basic,
-    "R2PFB_basic":          workflow_R2PFB_basic,
     "I_video_output":       workflow_I_video_output,
     "J_alpha_compositing":  workflow_J_alpha_compositing,
 }

@@ -21,11 +21,13 @@ hf download houyuanchen/UniVidX    --local-dir ComfyUI/models/unividx
 |---|---|---|---|---|---|
 | [`t2RAIN_basic.json`](t2RAIN_basic.json) | `t2RAIN` | intrinsic | text | RGB + Albedo + Irradiance + Normal | ~10 min |
 | [`t2RAIN_tiny_api.json`](t2RAIN_tiny_api.json) | `t2RAIN` | intrinsic | text | RGB + Albedo + Irradiance + Normal | ~2 min |
-| [`R2AIN_basic.json`](R2AIN_basic.json) | `R2AIN` | intrinsic | RGB | Albedo + Irradiance + Normal | ~10 min |
+| [`R2AIN_video_api.json`](R2AIN_video_api.json) | `R2AIN` | intrinsic | RGB **video clip** via `VHS_LoadVideoPath` | Albedo + Irradiance + Normal | ~10 min |
 | [`t2RPFB_basic.json`](t2RPFB_basic.json) | `t2RPFB` | alpha | text | Composite + Pha + Fgr + Bgr | ~10 min |
-| [`R2PFB_basic.json`](R2PFB_basic.json) | `R2PFB` | alpha | RGB | Pha + Fgr + Bgr | ~10 min |
+| [`R2PFB_video_api.json`](R2PFB_video_api.json) | `R2PFB` | alpha | RGB **video clip** via `VHS_LoadVideoPath` | Pha + Fgr + Bgr | ~10 min |
 | [`I_video_output.json`](I_video_output.json) | `t2RAIN` | intrinsic | text | 4× MP4 via VHS_VideoCombine | ~10 min |
-| [`J_alpha_compositing.json`](J_alpha_compositing.json) | `R2PFB` | alpha | RGB | Composited PNG | ~10 min |
+| [`J_alpha_compositing.json`](J_alpha_compositing.json) | `R2PFB` | alpha | RGB still | Composited PNG | ~10 min |
+
+> **The `_video_` workflows** are the canonical RGB-conditioned demos. They load 21 evenly-spaced frames from an MP4 via `VHS_LoadVideoPath` and feed them as conditioning into UniVidX. **Edit node 3's `video` field to point at your own MP4** — VHS requires an absolute path on this build (`Invalid file path` error otherwise). Both workflows require [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite).
 
 ¹ Wall time on RTX 5090 (32 GB), bfloat16, 480×640×21 frames × 20 steps. Add ~3 min for the first cold load per session — subsequent runs hit the model cache. The `_tiny_` variant uses 256×256 × 5 frames × 3 steps for fast smoke tests.
 
@@ -46,19 +48,19 @@ The flagship demo. Type a prompt, get RGB + Albedo + Irradiance + Normal as four
 
 **Tip:** the bundled negative prompt is the upstream Chinese standard. Keep it. English-only negatives noticeably weaken the result because Wan2.1's text encoder was trained on Chinese.
 
-### `R2AIN_basic.json` — RGB-conditioned re-decomposition
+### `R2AIN_video_api.json` — RGB-conditioned re-decomposition (video input)
 
-Provide an existing RGB clip; UniVidX produces matched Albedo / Irradiance / Normal. The decoder's `rgb` slot is a black placeholder (RGB was the input, not regenerated).
+Feed any MP4. UniVidX produces matched Albedo / Irradiance / Normal for the same 21 evenly-spaced frames. The decoder's `rgb` slot is a black placeholder (RGB was the input, not regenerated).
 
-Replace the bundled `LoadImage` + `RepeatImageBatch` chain with your own RGB source. Make sure the frame count fed in matches `num_frames` in the sampler — the node resamples temporally if they differ, which can degrade quality for big mismatches.
+Edit node 3's `video` field to point at your own clip (absolute path required). Tweak `select_every_nth` if your source clip is much shorter or longer than ~480 frames — the goal is 21 frames spaced across whatever you want UniVidX to see.
 
 ### `t2RPFB_basic.json` — Text → composite/matte/fg/bg
 
-Same idea as `t2RAIN` but for the **alpha** family. Be aware: text-only alpha decomposition tends to produce a near-uniform white matte (`mean ≈ 254.9`, `std ≈ 0.7` in our test runs) because the model can't decide what's foreground without an RGB reference. Use `R2PFB_basic.json` instead for production-quality mattes.
+The alpha family from text alone. Be aware: text-only alpha decomposition tends to produce a near-uniform white matte (`mean ≈ 254.9`, `std ≈ 0.7` in our test runs) because the model can't decide what's foreground without an RGB reference. Use `R2PFB_video_api.json` instead for production-quality mattes.
 
-### `R2PFB_basic.json` — Sharp alpha matte from an RGB clip
+### `R2PFB_video_api.json` — Sharp alpha matte from a video clip
 
-The most useful alpha workflow. Feed an RGB clip, get a clean alpha matte + isolated foreground + clean background. The matte has high contrast (in our test runs, `mean ≈ 27.1`, `std ≈ 75.5` — sharp silhouette). The `composite_rgb` decoder slot is black (RGB was the input).
+The most useful alpha workflow. Feed an MP4, get a clean alpha matte + isolated foreground + clean background. The matte is a binary-quality mask (in our LTX test run, `mean ≈ 32`, `std ≈ 80` — sharp figure-ground separation). The `composite_rgb` decoder slot is black (RGB was the input). Same `VHS_LoadVideoPath` setup as `R2AIN_video_api.json` — edit node 3's path.
 
 ### `I_video_output.json` — Direct MP4 export
 
@@ -134,7 +136,7 @@ The bundled `python install.py` creates a Windows directory junction (or POSIX s
 
 - **`MissingModelFile` at startup** — re-run the `hf download` commands. The path resolver lists the exact missing file.
 - **`R2AIN` `rgb` output is black** — that's correct. `R2AIN` uses RGB as input, so the decoder's `rgb` slot returns a black placeholder of the right shape (so downstream nodes don't break on a missing key).
-- **Text-only alpha matte (`t2RPFB`) comes out white** — known model limitation, not a bug. Use `R2PFB_basic.json` instead and feed an RGB clip.
+- **Text-only alpha matte (`t2RPFB`) comes out white** — known model limitation, not a bug. Use `R2PFB_video_api.json` instead and feed a video clip.
 - **OOM on a 24 GB GPU** — bump the VRAM buffer to 8 GB in `src/runtime.py` (search for `vram_buffer=4.0`), or lower `num_frames` / `height` / `width` in the sampler widget.
 - **Per-step time > 1 min on a ≥32 GB GPU** — VRAM management didn't activate. Verify GPU temp during sampling — if it stays under 60°C with 99% util, the run is memory-bound. See the README's [Performance & VRAM](../README.md#performance--vram) section.
 - **First run takes 3-5 min before sampling starts** — that's the cold model load (28 GB DiT + LoRA attachment). Subsequent runs in the same ComfyUI session hit the cache and skip this.
@@ -148,15 +150,16 @@ The bundled `python install.py` creates a Windows directory junction (or POSIX s
 examples/
 ├── README.md                     ← you are here
 ├── _build_ui_workflows.py        ← regenerates all *.json from templates after node-schema edits
-├── _smoke_runner.py              ← submits a UI workflow to the running ComfyUI for end-to-end smoke
-├── _smoke_runner_R2AIN.py        ← variant for the R2AIN demo
-├── _smoke_runner_tiny.py         ← variant for the tiny config
+├── _smoke_runner.py              ← submits the t2RAIN UI workflow for end-to-end smoke
+├── _smoke_runner_tiny.py         ← variant for the tiny config (256×256 × 5f × 3 steps)
+├── _build_ui_workflows.py        ← regenerates the UI-format JSONs (text-only + I + J)
+├── _build_video_workflows.py     ← regenerates R2AIN_video_api / R2PFB_video_api
 ├── t2RAIN_basic.json             ← UI workflow (drag onto canvas)
 ├── t2RAIN_basic_api.json         ← API payload (POST to /prompt)
 ├── t2RAIN_tiny_api.json          ← API payload, tiny config (CI)
-├── R2AIN_basic.json + _api.json
 ├── t2RPFB_basic.json + _api.json
-├── R2PFB_basic.json + _api.json
+├── R2AIN_video_api.json          ← video-conditioned intrinsic (edit `video` path)
+├── R2PFB_video_api.json          ← video-conditioned alpha (edit `video` path)
 ├── I_video_output.json + _api.json
 ├── J_alpha_compositing.json + _api.json
 └── test_matrix/

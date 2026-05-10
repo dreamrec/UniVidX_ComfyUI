@@ -101,23 +101,22 @@ The flagship demo. Generate a 21-frame 480×640 video with full RGB / Albedo / I
 
 Drag the JSON onto canvas, queue, get four PNG sequences. ~10 min wall time on a 5090.
 
-### `examples/R2AIN_basic.json` — RGB-Conditioned Re-Decomposition
+### `examples/R2AIN_video_api.json` — RGB-Conditioned Re-Decomposition
 
-Provide an existing RGB video; UniVidX produces matched Albedo / Irradiance / Normal channels. The decoder's `rgb` slot becomes a black placeholder (RGB was the input, not regenerated).
+Feed any MP4 — UniVidX produces matched Albedo / Irradiance / Normal channels for the same 21 evenly-spaced frames. The decoder's `rgb` slot becomes a black placeholder (RGB was the input, not regenerated). Uses [VHS_LoadVideoPath](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) to pull frames from disk; **edit the absolute `video` path** in node 3 before queueing.
 
 ```text
-[Model Setup] → [RGB Conditioning] → [Sampling] → [Decode] → [Outputs]
-                 LoadImage
-                 RepeatImageBatch
+[Model Setup] → [VHS_LoadVideoPath] → [Sampling] → [Decode] → [Outputs]
+                 (your.mp4 → 21 frames)
 ```
 
 ### `examples/t2RPFB_basic.json` — Alpha Decomposition (Text-to-All)
 
-Same idea but for the **alpha** family — produces composite RGB, alpha matte, foreground, background from text alone. Alpha decomposition works much better when an RGB reference is provided (see R2PFB below); without one, the matte tends to come out nearly all-white.
+The alpha family from text alone — produces composite RGB, alpha matte, foreground, background. Alpha decomposition is much weaker without an RGB reference; expect the matte to come out near-uniform white. Use `R2PFB_video_api.json` instead for production-quality mattes.
 
-### `examples/R2PFB_basic.json` — Sharp Alpha Matte from RGB
+### `examples/R2PFB_video_api.json` — Sharp Alpha Matte from a Video Clip
 
-The most useful alpha workflow: feed an RGB clip, get a clean alpha matte + isolated foreground + clean background. The matte is a real production-grade mask, not just a visualization. The `composite_rgb` slot is a black placeholder (RGB was the input).
+The most useful alpha workflow. Feed any MP4 — get a clean alpha matte + isolated foreground + clean background. The matte is a real production-grade mask. Same `VHS_LoadVideoPath` setup as `R2AIN_video_api.json`; the `composite_rgb` slot is a black placeholder.
 
 ### `examples/J_alpha_compositing.json` — End-to-End VFX Composite
 
