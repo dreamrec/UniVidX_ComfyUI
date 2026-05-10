@@ -81,11 +81,16 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
     Load (or return from cache) UniVidIntrinsic or UniVidAlpha.
 
     variant: 'intrinsic' or 'alpha'.
-    vram_buffer: DEPRECATED on current DiffSynth (the
-        WanVideoPipeline.enable_vram_management entrypoint was removed).
-        Cached separately per value purely so old workflows that wired
-        this in still get a unique cache slot; the value otherwise has
-        no effect on speed.
+    vram_buffer: GB of VRAM kept free for activations / KV cache / VAE
+        decode. Passed straight to UniVidX's pipeline-level
+        `enable_vram_management(vram_buffer=...)` (see
+        `vendor/UniVidX/src/pipelines/univid_intrinsic.py`), which wraps
+        the text encoder, DiT, and VAE through DiffSynth's low-level
+        `enable_vram_management()` helper so layers live on CPU and
+        stream to GPU only during forward. Higher values = more free
+        VRAM but slower (more streaming); lower values pack more model
+        in residency. On a 32 GB GPU, ~4.0 is a sane default for BF16
+        Wan2.1-14B + LoRAs.
     quantize_fp8: None (default), or one of optimum-quanto's qtype names —
         "qfloat8" (e4m3, larger mantissa) or "qfloat8_e5m2" (larger
         exponent). Post-quantizes the DiT via mmgp.offload.quantize.
@@ -107,11 +112,7 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
 
     paths = resolve_paths(_comfy_root())
     ckpt = paths[f"univid_{variant}_ckpt"]
-    # `vram_buffer` is intentionally omitted — the underlying API is a
-    # no-op on current diffsynth (see Loader tooltip + README), so
-    # including it would cause spurious double-loads when two loader
-    # nodes in the same graph differ only in this dead value.
-    cache_key = (variant, ckpt, device, dtype,
+    cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
                  quantize_fp8, bool(compile_dit), bool(prefer_sage_attn))
 
     with _LOAD_LOCK:
@@ -199,12 +200,31 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             if quantize_fp8:
                 _quantize_dit_fp8(model, qtype=quantize_fp8)
 
-            # Backwards-compat with old saved workflows — the underlying
-            # diffsynth API was removed, so this is a no-op on the
-            # current build. Kept so the hasattr-guard fires cleanly if
-            # a future diffsynth version reintroduces it.
-            if hasattr(model, "pipe") and hasattr(model.pipe, "enable_vram_management"):
-                model.pipe.enable_vram_management(vram_buffer=float(vram_buffer))
+            # Wire vram_buffer to UniVidX's pipeline-level VRAM manager.
+            # UniVidIntrinsic / UniVidAlpha define enable_vram_management()
+            # themselves (vendor/UniVidX/src/pipelines/univid_*.py) — it
+            # wraps text encoder + DiT + VAE through DiffSynth's low-level
+            # helper. The bf16 DiT is ~28 GB; without this the model
+            # alone saturates a 32 GB card and per-step balloons to
+            # 2-3+ min. With it, per-step is ~30 sec.
+            if hasattr(model, "enable_vram_management"):
+                try:
+                    model.enable_vram_management(vram_buffer=float(vram_buffer))
+                    _log.info("VRAM management enabled with vram_buffer=%.1f GB",
+                              float(vram_buffer))
+                except TypeError as exc:
+                    _log.warning(
+                        "model.enable_vram_management(vram_buffer=...) "
+                        "rejected the kwarg: %s. VRAM management was NOT "
+                        "applied — sampling may OOM or be memory-bound.",
+                        exc,
+                    )
+            else:
+                _log.warning(
+                    "Model class %s lacks enable_vram_management(); "
+                    "vram_buffer_gb has no effect on this build.",
+                    type(model).__name__,
+                )
 
             if compile_dit:
                 _compile_dit(model)

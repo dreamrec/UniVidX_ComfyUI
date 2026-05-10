@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0-rc1 — 2026-05-11
+
+Tier-A correctness fixes from `ROADMAP_v0.3.md`. Tagged as a release candidate because the perf delta on real hardware (Tier A5) is pending re-bench; the code change is complete and unit-test-covered.
+
+### Fixed
+
+- **`vram_buffer_gb` was a silent no-op in 0.1.0–0.2.1.** `src/runtime.py` called `model.pipe.enable_vram_management(vram_buffer=...)` — but `model.pipe` is DiffSynth's `WanVideoPipeline`, which has no such method. The `hasattr` guard returned False every time, so the call was skipped without logging. The actual entrypoint is `model.enable_vram_management(...)` on UniVidX's pipeline class (`vendor/UniVidX/src/pipelines/univid_intrinsic.py:210` and `univid_alpha.py:203`), which wraps text encoder + DiT + VAE through DiffSynth's low-level offload helper. The fix is a one-token change (`model.pipe` → `model`), wrapped in an `if/else` that logs `WARNING` when the method is genuinely absent (future upstream rev) so the no-op cannot recur silently.
+- **`vram_buffer` re-added to the cache key.** 0.2.0 removed it on the assumption it was dead, which was correct given the silent no-op. With the wiring fix above it's load-affecting again, so two loader nodes with different `vram_buffer_gb` settings now get distinct cache entries (previously: the second node silently inherited whichever value loaded first).
+- **Loader tooltip + README** drop the "DEPRECATED, no-op" framing. Tooltip now describes the actual mechanic (GB of free VRAM, controls layer streaming aggressiveness). The "What does NOT help on Blackwell" section no longer claims `vram_buffer_gb` is dead.
+
+### Added
+
+- **4 new unit tests in `tests/test_runtime_cache_key.py`**: pins the new `enable_vram_management` target (model, not model.pipe), the WARNING log when the method is absent, the cache hit on identical `vram_buffer`, and the cache miss on distinct values. 35 → 39 unit tests.
+
+### Pending before tagging `0.3.0`
+
+- **Tier A5 re-bench.** Now that `vram_buffer_gb` is load-affecting, the README perf table needs an honest measurement of `vram_buffer=4` vs `vram_buffer=12` on a 32 GB card. The RC ships with "perf Δ un-benched" in that table row; the final 0.3.0 tag will replace it with measured numbers. (Cannot reliably re-bench from an automated session — the run takes ~30 min and needs the user's GPU.)
+
 ## 0.2.1 — 2026-05-11
 
 External-review fixes (h/t the second-pass code review against `4c1f282`):

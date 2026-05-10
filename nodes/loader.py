@@ -76,13 +76,17 @@ class UniVidXLoader:
                 "vram_buffer_gb": ("FLOAT", {
                     "default": 4.0, "min": 0.0, "max": 96.0, "step": 0.5,
                     "tooltip": (
-                        "DEPRECATED on current diffsynth — the underlying "
-                        "WanVideoPipeline.enable_vram_management API was "
-                        "removed. The runtime call is a no-op on this build. "
-                        "Left here for backwards-compat with saved workflows; "
-                        "value has no effect on speed. (Will be re-wired if a "
-                        "future diffsynth version reintroduces a comparable "
-                        "memory-management entrypoint.)"
+                        "GB of VRAM kept free for activations / KV cache / "
+                        "VAE decode. Passed to UniVidX's pipeline-level "
+                        "enable_vram_management(), which wraps text encoder "
+                        "+ DiT + VAE through DiffSynth's offload helper so "
+                        "layers live on CPU and stream to GPU on demand. "
+                        "Higher = more headroom but more streaming (slower). "
+                        "Lower = more residency. 4.0 GB is a sane default "
+                        "for BF16 Wan2.1-14B + UniVidX LoRAs on 32 GB cards. "
+                        "Cached per (variant, dtype, vram_buffer, ...) so "
+                        "two loader nodes with different values get distinct "
+                        "model instances."
                     ),
                 }),
             },

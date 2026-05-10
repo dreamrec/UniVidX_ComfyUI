@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-GPL--3.0-2f855a)
 ![PyTorch](https://img.shields.io/badge/torch-%E2%89%A52.7%2Bcu128-ee4c2c)
 ![Nodes](https://img.shields.io/badge/nodes-5-f59e0b)
-![Tests](https://img.shields.io/badge/tests-24%20unit%20%2B%2010%20integration-success)
+![Tests](https://img.shields.io/badge/tests-39%20unit%20%2B%2010%20integration-success)
 
 ComfyUI custom nodes for [UniVidX](https://houyuanchen111.github.io/UniVidX.github.io/) (SIGGRAPH 2026): unified video diffusion that decomposes a clip into **RGB / Albedo / Irradiance / Normal** (intrinsic) or **Composite RGB / Alpha matte / Foreground / Background** (alpha). 30 task modes across two model variants, all driven from a single five-node graph.
 
@@ -86,7 +86,7 @@ Wired and validated on Blackwell (RTX 5090) + Windows + Python 3.12 + Torch 2.7.
 | `prefer_sage_attn=True` | Patches DiffSynth + UniVidX `flash_attention()` to cascade `sage → FA2 → SDPA`. Defensively un-pollutes `F.scaled_dot_product_attention` (see Stable3DGen note below). | **–18% wall, –21% per-step** | Quality verified visually identical to FA2 baseline |
 | `compile_dit=True` | `torch.compile(dit, mode='reduce-overhead', dynamic=True)` | **–17% wall, –28% per-step** | First sampler step pays ~90 s graph capture |
 | `dtype=fp8_e4m3fn` / `fp8_e5m2` | Post-quantize DiT via `mmgp.offload.quantize` | **EXPERIMENTAL — hangs in our test** | See FP8 status below |
-| `vram_buffer_gb` | (Deprecated, no-op on current DiffSynth) | none | Kept for backwards-compat; widget tooltip explains |
+| `vram_buffer_gb` | GB kept free for activations; wires to UniVidX's pipeline-level `enable_vram_management()` (text encoder + DiT + VAE layer streaming) | **Wired in 0.3.0; perf Δ un-benched in this RC** | Was silently no-op in 0.1.0–0.2.1 (called on `model.pipe` instead of `model` — see CHANGELOG). Lower = more residency, higher = more activation headroom. 4.0 GB default for BF16 14B + LoRAs on 32 GB cards. |
 
 **Important: the two working knobs do NOT stack.** Both target the same per-step DiT bottleneck — combining them ran 14.99 min, *worse* than either alone. Pick one.
 
@@ -106,7 +106,6 @@ Match the wheel to your stack: `cu128`/`cu130` (CUDA), `torch2.7.1`/`2.8.0` (PyT
 
 - **Flash Attention 3** — Hopper-only (H100/H800). Doesn't apply to RTX 5090.
 - **Flash Attention 4** — Linux-only on PyPI; module name (`flash_attn.cute`) doesn't match DiffSynth's auto-detect.
-- **`vram_buffer_gb`** — `WanVideoPipeline.enable_vram_management(...)` was removed in current DiffSynth. Our `hasattr`-guarded call silently no-ops. Widget kept for old-workflow compat.
 
 ### FP8 status
 
@@ -125,7 +124,7 @@ Five nodes, all under the `UniVidX` category. Custom socket types — `UNIVIDX_M
 
 </td><td>
 
-**`UniVidXLoader`** — Loads `intrinsic` or `alpha` variant, exposes the perf knobs (`compile_dit`, `prefer_sage_attn`, `dtype`). Models are cached per `(variant, ckpt, device, dtype, fp8_qtype, compile_dit, prefer_sage_attn)` so toggling triggers a clean re-load. The deprecated `vram_buffer_gb` is intentionally NOT in the key (it's a no-op on current DiffSynth, so including it would force spurious double-loads).
+**`UniVidXLoader`** — Loads `intrinsic` or `alpha` variant, exposes the perf knobs (`compile_dit`, `prefer_sage_attn`, `dtype`, `vram_buffer_gb`). Models are cached per `(variant, ckpt, device, dtype, vram_buffer, fp8_qtype, compile_dit, prefer_sage_attn)` so toggling any of them triggers a clean re-load. `vram_buffer_gb` is in the key as of 0.3.0 because it now actually controls VRAM management (was a no-op in 0.1.0–0.2.1).
 
 </td></tr>
 <tr><td>
@@ -189,7 +188,7 @@ For modes where a modality is a *condition*, the corresponding decoder output is
 
 Full v0.3 execution plan in [`ROADMAP_v0.3.md`](ROADMAP_v0.3.md). Summary of priority order (corrected after second-pass review):
 
-1. **`vram_buffer_gb` correctness fix** — present bug, not future work. The widget is documented as "deprecated, no-op" but the only reason it's a no-op is that `runtime.py` calls `model.pipe.enable_vram_management(...)` (DiffSynth's `WanVideoPipeline`, no such method) instead of `model.enable_vram_management(...)` — which UniVidX's pipeline classes DO define at [`vendor/UniVidX/src/pipelines/univid_intrinsic.py:210`](vendor/UniVidX/src/pipelines/univid_intrinsic.py) and `univid_alpha.py:203`. One-line fix unlocks working VRAM management; cache key needs `vram_buffer` re-added once active. **Do this first** — it's a 1-day correctness fix, ahead of FP8.
+1. ~~**`vram_buffer_gb` correctness fix**~~ — **shipped in 0.3.0-rc1.** `runtime.py` now calls `model.enable_vram_management(vram_buffer=...)` on UniVidX's pipeline class directly (was calling `model.pipe.enable_vram_management` — DiffSynth's `WanVideoPipeline`, no such method). Cache key includes `vram_buffer` so distinct values get distinct cache entries. Perf delta vs 0.2.1's silent no-op pending a Tier-A5 re-bench on RTX 5090. (See CHANGELOG 0.3.0.)
 2. **FP8 via pre-quantized Kijai weights** (replaces the hung runtime-quantize path). The current `dtype=fp8_*` knob calls `mmgp.offload.quantize()` AFTER constructing a full BF16 DiT — which both hangs and destroys the main benefit (the BF16 cold load). Right design is a deeper refactor:
   1. **Split the public knob** into `compute_dtype = {bf16, fp16}` and `dit_weight_mode = {bf16_shards, fp8_prequantized, fp8_runtime_experimental}` so users get clear choices and runtime quantization is hidden behind an explicit experimental flag.
   2. **Add path resolution** for pre-quantized weights at `ComfyUI/models/diffusion_models/Wan2_1-T2V-14B_fp8_e4m3fn.safetensors` (Kijai/ComfyUI convention).
@@ -199,7 +198,6 @@ Full v0.3 execution plan in [`ROADMAP_v0.3.md`](ROADMAP_v0.3.md). Summary of pri
   6. **Phase 2 ("fast FP8"):** adapter-aware `_scaled_mm` for the base projection plus BF16 LoRA residuals. Needs a custom adapter-aware Linear or a real PEFT integration — not just Kijai's no-LoRA fast path.
   7. **Validate** with the tiny R2AIN/R2PFB workflows first, then benchmark BF16 vs FP8 on cold-load time, peak VRAM, per-step time, and output sanity (per-modality SSIM/PSNR vs the BF16 reference).
 - **Step-distill LoRA stacking** — try [LightX2V's `Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors`](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v) on top of UniVidX's per-modality LoRA. Could close the small quality gap of the PREVIEW 4-step preset. Needs PEFT compatibility verification with UniVidX's `add_multiple_loras_to_model` machinery.
-- **DiffSynth `vram_limit` re-wire** — current diffsynth replaced `enable_vram_management` with `ModelConfig`-driven `vram_limit` + per-config `offload_dtype`/`onload_dtype`. Re-wire our `vram_buffer_gb` knob to the new API instead of the no-op `hasattr`-guarded legacy call.
 
 ## Requirements
 
