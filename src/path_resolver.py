@@ -5,6 +5,10 @@ Returns absolute paths; raises MissingModelFile with a clear message if any
 required file is absent so the user can fix the install before the model load
 attempts and crashes deep inside DiffSynth.
 """
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Union
 
@@ -52,3 +56,58 @@ def resolve_paths(comfy_root: str) -> Dict[str, Union[str, List[str]]]:
         "univid_intrinsic_ckpt": univid_intrinsic_ckpt,
         "univid_alpha_ckpt": univid_alpha_ckpt,
     }
+
+
+def _link_dir(src: Path, dst: Path) -> None:
+    """Create a directory link at dst pointing to src. Uses junction on Windows, symlink on POSIX."""
+    if dst.exists() or dst.is_symlink():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        # Windows junction — does not require admin or developer mode.
+        # subprocess avoids needing _winapi imports and works on all Python 3.10+ builds.
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(dst), str(src)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise OSError(f"mklink /J failed: {result.stderr or result.stdout}")
+    else:
+        os.symlink(src, dst, target_is_directory=True)
+
+
+def _link_file(src: Path, dst: Path) -> None:
+    """Create a file link at dst pointing to src. Uses hardlink on Windows, symlink on POSIX."""
+    if dst.exists() or dst.is_symlink():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        # Hardlink — works without admin if both paths are on the same volume.
+        # Falls back to copy if cross-volume (common in CI).
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+    else:
+        os.symlink(src, dst)
+
+
+def ensure_symlinks(comfy_root: str, unividx_root: str) -> None:
+    """
+    Create directory junction + hardlinks inside ${unividx_root}/{models,checkpoints}/
+    that point to real files under ${comfy_root}/models/. UniVidX's pipeline code
+    uses hardcoded relative paths assuming this layout.
+    """
+    paths = resolve_paths(comfy_root)
+    unividx = Path(unividx_root)
+
+    wan_target = Path(paths["wan_t5"]).parent  # the wan21_t2v_14b dir
+    wan_link = unividx / "models" / "Wan-AI" / "Wan2.1-T2V-14B"
+    _link_dir(wan_target, wan_link)
+
+    for key, name in [
+        ("univid_intrinsic_ckpt", "univid_intrinsic.safetensors"),
+        ("univid_alpha_ckpt", "univid_alpha.safetensors"),
+    ]:
+        link = unividx / "checkpoints" / name
+        _link_file(Path(paths[key]), link)
