@@ -61,18 +61,33 @@ def unividx_cwd():
         os.chdir(prev)
 
 
-def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch.bfloat16):
+def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch.bfloat16,
+               vram_buffer: float = 4.0, quantize_fp8: str | None = None):
     """
     Load (or return from cache) UniVidIntrinsic or UniVidAlpha.
 
     variant: 'intrinsic' or 'alpha'.
+    vram_buffer: GB of GPU VRAM to keep free for activations. Lower = more
+        model resident, faster per-step. 4.0 streams most of the 28 GB DiT
+        from CPU on demand (suitable for 24 GB GPUs); 12.0 keeps most of
+        the DiT resident on a 32 GB GPU and roughly halves per-step time;
+        on 48-96 GB cards (RTX 6000 Pro Blackwell, RTX 5000 Ada) any
+        small buffer gives full residency. Cached separately per buffer
+        value so changing it re-applies the right offload policy.
+    quantize_fp8: None (default), or one of optimum-quanto's qtype names —
+        "qfloat8" (e4m3, larger mantissa) or "qfloat8_e5m2" (larger
+        exponent). Post-quantizes the DiT via mmgp.offload.quantize.
+        Halves DiT memory (~28 GB BF16 → ~14 GB FP8), enabling full
+        residency on 32 GB GPUs without streaming, plus Blackwell native
+        FP8 matmul. Experimental: LoRA layers are excluded from
+        quantization to keep adapter precision intact.
     """
     if variant not in ("intrinsic", "alpha"):
         raise ValueError(f"variant must be 'intrinsic' or 'alpha', got {variant!r}")
 
     paths = resolve_paths(_comfy_root())
     ckpt = paths[f"univid_{variant}_ckpt"]
-    cache_key = (variant, ckpt, device, dtype)
+    cache_key = (variant, ckpt, device, dtype, float(vram_buffer), quantize_fp8)
 
     with _LOAD_LOCK:
         if cache_key in _MODEL_CACHE:
@@ -121,11 +136,24 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             # modules so they live on CPU and stream to GPU only during forward.
             # vram_buffer=4.0 keeps ~4 GB free for activations.
             #
-            # Tunable: pass a smaller buffer for more headroom (slower per step
-            # but leaves room for a higher resolution). Pass num_persistent_param_in_dit
-            # to keep a specific number of DiT params resident.
+            # Optional post-load FP8 quantization. UniVidX hardcodes
+            # WanVideoPipeline construction at bfloat16; we can't change
+            # that without patching upstream, but we *can* post-quantize
+            # the assembled DiT (base + LoRA-attached) to qfloat8 via
+            # optimum-quanto. We exclude lora_A/lora_B/lora_embedding
+            # layers from quantization so the LoRA adapter stays full
+            # precision. On a 32 GB GPU the FP8 DiT (~14 GB) fits fully
+            # resident, so we also drop the VRAM buffer to 0.0 (no need
+            # to stream when everything's already on-chip).
+            if quantize_fp8:
+                _quantize_dit_fp8(model, qtype=quantize_fp8)
+
+            # Tunable per-loader: passed through from the UniVidXLoader's
+            # vram_buffer_gb widget. 4.0 (default) is the safe choice on
+            # 24 GB GPUs; on 32 GB+ raise to ~12.0 to keep more of the DiT
+            # resident and roughly double per-step throughput.
             if hasattr(model, "pipe") and hasattr(model.pipe, "enable_vram_management"):
-                model.pipe.enable_vram_management(vram_buffer=4.0)
+                model.pipe.enable_vram_management(vram_buffer=float(vram_buffer))
 
         _MODEL_CACHE[cache_key] = model
         return model
@@ -155,6 +183,36 @@ def _patch_unividx_load_file_to_readonly() -> None:
         if getattr(existing, "_unividx_readonly_patch", False):
             continue
         mod.load_file = _readonly_load_file
+
+
+def _quantize_dit_fp8(model, qtype: str = "qfloat8") -> None:
+    """Post-quantize model.pipe.dit to FP8 via mmgp/optimum-quanto.
+
+    qtype is an optimum-quanto qtype name — "qfloat8" (e4m3) or
+    "qfloat8_e5m2". LoRA adapter layers (lora_A/B/_embedding_A/B) are
+    excluded so the rank-32 adapters stay in BF16 — quantizing rank-32
+    Linear layers gives no memory win and tends to degrade adapter
+    quality.
+    """
+    try:
+        from mmgp import offload as _mmgp_offload
+    except ImportError as e:
+        raise RuntimeError(
+            "FP8 quantization requested but mmgp is not installed. "
+            "Run `pip install mmgp` or pick a non-FP8 dtype."
+        ) from e
+
+    dit = getattr(getattr(model, "pipe", None), "dit", None)
+    if dit is None:
+        raise RuntimeError(
+            "Cannot find model.pipe.dit to quantize — UniVidX pipeline "
+            "structure may have changed."
+        )
+    _mmgp_offload.quantize(
+        dit,
+        weights=qtype,
+        exclude=["*lora_A*", "*lora_B*", "*lora_embedding_A*", "*lora_embedding_B*"],
+    )
 
 
 def clear_cache() -> None:

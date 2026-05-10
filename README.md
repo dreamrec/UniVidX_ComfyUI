@@ -23,15 +23,15 @@ Five nodes. One text prompt in. Four physically-distinct video modalities out �
 
 ### Intrinsic decomposition — RGB / Albedo / Irradiance / Normal
 
-![Intrinsic quad](assets/results/intrinsic_quad.jpg)
+![Intrinsic quad](assets/results/LTX_intrinsic_quad.jpg)
 
-The RGB is the full-shaded composite. Albedo is the lighting-removed surface color. Irradiance is the geometry-free incoming light field. Normal encodes surface direction as XYZ→RGB. All four are temporally consistent across the 21-frame clip.
+A 21-frame portrait clip conditioned on the input RGB (mode `R2AIN`, intrinsic variant). UniVidX strips the warm candlelight from the **albedo** — same subject under neutral daylight, even the dark wallpaper pattern becomes legible. **Irradiance** isolates the soft incoming light field as a sepia gradient with the candle highlights baked in. **Normal** encodes surface direction as XYZ→RGB — cheekbones, nose, hair flow direction all readable. The decoder's RGB slot is a black placeholder (RGB was the input); we paste the conditioning frame back in here so the comparison is legible.
 
 ### Alpha decomposition — Composite / Matte / Foreground / Background
 
-![Alpha quad](assets/results/alpha_quad.jpg)
+![Alpha quad](assets/results/LTX_alpha_quad.jpg)
 
-The matte is a true binary-quality mask, not a heatmap visualization. `R2PFB` mode (RGB-conditioned) gives the cleanest mattes; text-only `t2RPFB` tends to produce a near-uniform white matte because the model can't decompose without a reference frame.
+Same source clip, alpha variant + mode `R2PFB`. The **alpha matte** is a true binary mask — head + hair + shoulders cleanly separated from the candlelit background, no fuzz around the silhouette. **Foreground** isolates the subject onto white. **Background** is the most striking output: the model inpaints the wallpaper, the chair back, and the candle stand *behind* where the subject was sitting, hallucinating the occluded geometry. Text-only `t2RPFB` would produce a near-uniform white matte; RGB conditioning is what gives the model the figure-ground signal it needs.
 
 ## Features
 
