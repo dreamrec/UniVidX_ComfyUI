@@ -95,12 +95,74 @@ For modes where a modality is a condition rather than a target, the correspondin
 - No support for stacking community Wan LoRAs / ControlNet inside the UniVidX pipeline. That requires a deeper native integration (Strategy B/C).
 - Outputs for non-target modalities are black placeholder IMAGE batches (e.g. for `R2AIN`, the decoder's `rgb` output is black because RGB was the input, not regenerated).
 
+## Performance & VRAM management
+
+Wan2.1-T2V-14B is **~28 GB FP16**. On a 32 GB GPU it would otherwise pin VRAM
+at the ceiling and leave no headroom for activations / KV cache / VAE decode,
+making each inference step memory-bound (GPU at 99 % util but only 50 °C —
+classic memory-bound signature) at 2-3+ minutes per step.
+
+`runtime.load_model()` calls `pipe.enable_vram_management(vram_buffer=4.0)`
+after model construction. This wraps the DiT's `Linear` / `Conv3d` /
+`LayerNorm` / `RMSNorm` modules with auto-offload wrappers — modules live on
+CPU and stream to GPU only during their forward pass. With 16+ GB host RAM
+this leaves comfortable working memory on GPU.
+
+**Validated benchmarks** (RTX 5090, 32 GB, torch 2.7.0+cu128, t2RAIN mode):
+
+| Resolution × frames × steps | Per-step time | Total wall time |
+|---|---|---|
+| 256×256 × 5 frames × 3 steps  | ~7.9 sec/step | 130 sec  (incl. cold load) |
+| 480×640 × 21 frames × 20 steps | ~30.2 sec/step | 628 sec (incl. cold load) |
+
+If you need to tune for your hardware:
+- **Less VRAM**: lower `vram_buffer` floor (more aggressive offload, slower per
+  step). Edit `src/runtime.py` and pass e.g. `vram_buffer=8.0`.
+- **More headroom**: increase `vram_buffer` for headroom during high-res runs.
+- **Pin specific param count**: pass `num_persistent_param_in_dit=N` to keep
+  exactly N DiT params resident (e.g. for streaming setups).
+
+## Windows-specific implementation notes
+
+Three Windows-specific compatibility patches are baked into this pack. They
+fire automatically on Windows; on POSIX systems they are no-ops.
+
+1. **Backslash escaping in JSON paths** (`src/runtime.py`).
+   UniVidX's `WanVideoPipeline` constructor takes a `model_paths` argument as
+   a JSON string and runs `json.loads(model_paths)` internally. Windows paths
+   like `D:\ComfyUI\models\...` contain `\D` and `\m` which are invalid JSON
+   escapes. We construct the string with `json.dumps([t5, vae])` so backslashes
+   are properly escaped. Without this, the loader fails with
+   `json.decoder.JSONDecodeError: Invalid \escape`.
+
+2. **Read-only mmap for safetensors** (`src/runtime.py`).
+   The mmgp library (transitive dep of DiffSynth) monkey-patches
+   `safetensors.torch.load_file` with a memory-mapped reader using
+   `mmap.ACCESS_COPY`. Six 9.84 GB Wan2.1 DiT shards mmapped concurrently
+   require ~60 GB of Windows paging-file commit, which exceeds most users'
+   default and surfaces as `[WinError 1455] The paging file is too small`.
+   We monkey-patch `load_file` inside `vendor/UniVidX/src/pipelines/...`
+   namespaces to use `writable_tensors=False` (`ACCESS_READ`) instead — no
+   commit charge needed since UniVidX only reads the tensors before copying
+   to GPU.
+
+3. **Junctions and hardlinks instead of symlinks** (`src/path_resolver.py`).
+   `os.symlink()` on Windows requires Administrator privileges or Developer
+   Mode. We use `mklink /J` (directory junction) for the Wan2.1 model dir
+   link and `os.link()` (hardlink) for individual checkpoint files. Both
+   work without privileges. If source and destination are on different
+   volumes, hardlinks fall back to `shutil.copy2` (which costs ~1.5 GB extra
+   disk for the UniVidX checkpoints if they're cross-volume).
+
 ## Troubleshooting
 
 - **`MissingModelFile`** at startup: a Wan2.1 or UniVidX file is missing from `models/`. Re-run the download commands above.
-- **OOM at sample time**: lower `num_frames`, `height`, or `width`; UniVidX has DiffSynth-Studio's VRAM management built in but 14B is tight on 24 GB.
+- **OOM at sample time**: VRAM management is enabled by default with a 4 GB buffer. If you still OOM, raise the buffer (edit `src/runtime.py`'s `enable_vram_management(vram_buffer=...)`) or lower `num_frames` / `height` / `width`.
 - **Black outputs**: pipe likely failed silently. Check ComfyUI's terminal for tracebacks.
 - **Slow first run**: model load takes 5+ minutes (28 GB of weights). Subsequent runs reuse the cache.
+- **Slow per-step time** (>1 min on a 32 GB+ GPU): VRAM management may not be activating. Verify `pipe.enable_vram_management` was called by checking the GPU temp during sampling — if it's <60 °C with 99 % util, you're memory-bound.
 - **`ImportError: No module named diffsynth`**: `pip install diffsynth>=2.0` into the same Python that runs ComfyUI.
-- **`WinError 1314`** (Windows symlink): see Windows-specific notes above.
+- **`WinError 1314`** (Windows symlink): see Windows-specific notes above. Should not occur — we use junctions/hardlinks instead.
+- **`WinError 1455` The paging file is too small**: should not occur — the readonly mmap patch fixes this. If it does, verify `mmgp` is installed in the venv.
+- **`json.decoder.JSONDecodeError: Invalid \escape`**: should not occur — the `json.dumps` patch fixes this. If it does, verify `runtime.py` is the patched version (commit `e0b17b7` or later).
 - **`CUDA error: no kernel image is available for execution on the device.`**: torch is too old for your GPU. Upgrade to `torch>=2.7+cu128`.
