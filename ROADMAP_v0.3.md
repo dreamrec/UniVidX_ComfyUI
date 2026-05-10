@@ -1,5 +1,7 @@
 # Roadmap — v0.3
 
+> **Errata (2026-05-11, post-implementation):** Tier A1's stated root cause is wrong. The roadmap claims `model.pipe` is DiffSynth's stock `WanVideoPipeline` (no `enable_vram_management`), so 0.2.1's call was silently no-op'ing. **A live runtime probe disproved this:** when the runtime was changed to target `model.enable_vram_management(...)` per the roadmap, ComfyUI emitted `WARNING: Model class UniVidIntrinsic lacks enable_vram_management()` — proving the outer class lacks the method. `model.pipe` is in fact an instance of UniVidX's OWN `WanVideoPipeline` subclass at `vendor/UniVidX/src/pipelines/univid_intrinsic.py:24` (method at line 210), which is exactly what 0.2.1 was already targeting. The actual fixes in `0.3.0-rc1` are narrower than this document anticipated: the cache-key omission (real bug — A2 stands) + the documentation accuracy (the "deprecated, no-op" framing was based on this same misdiagnosis). A1's `model.pipe`→`model` change has been reverted; see CHANGELOG `0.3.0-rc1 / Diagnosis correction`.
+
 Self-contained execution plan. Picks up cold from `main` at `4dc9f99` (v0.2.1).
 
 This document was assembled after a second-pass external review identified that two roadmap items shipped in v0.2.0/0.2.1 are mis-prioritized:

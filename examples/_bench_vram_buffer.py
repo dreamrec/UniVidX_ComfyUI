@@ -37,7 +37,7 @@ REPO = Path(__file__).resolve().parent.parent
 WF_PATH = REPO / "examples" / "R2AIN_video_api.json"
 
 
-def _http_get(url: str, timeout: float = 10.0):
+def _http_get(url: str, timeout: float = 60.0):
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return json.load(resp)
 
@@ -76,10 +76,12 @@ def wait_for_completion(base_url: str, prompt_id: str,
     deadline = time.monotonic() + timeout_sec
     last_log = 0.0
     while time.monotonic() < deadline:
+        hist = {}
         try:
             hist = _http_get(f"{base_url}/history/{prompt_id}")
-        except urllib.error.HTTPError:
-            hist = {}
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+            print(f"  [{time.strftime('%H:%M:%S')}] poll error ({type(exc).__name__}), retrying",
+                  flush=True)
         entry = hist.get(prompt_id)
         if entry is not None:
             status = entry.get("status", {})

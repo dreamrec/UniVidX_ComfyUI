@@ -57,12 +57,17 @@ def main() -> int:
     last_log = 0.0
     entry = None
     while time.monotonic() < deadline:
+        hist = {}
         try:
             with urllib.request.urlopen(f"{BASE}/history/{prompt_id}",
-                                         timeout=10) as resp:
+                                         timeout=60) as resp:
                 hist = json.load(resp)
-        except urllib.error.HTTPError:
-            hist = {}
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+            # ComfyUI can be unresponsive while busy with model load /
+            # sampling — treat transient HTTP failures as "still running"
+            # rather than aborting the whole bench.
+            print(f"  [{time.strftime('%H:%M:%S')}] poll error ({type(exc).__name__}), retrying",
+                  flush=True)
         entry = hist.get(prompt_id)
         if entry and entry.get("status", {}).get("completed"):
             break

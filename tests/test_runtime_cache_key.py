@@ -1,20 +1,23 @@
 """Tests for vram_buffer wiring + cache-key correctness in src.runtime.load_model.
 
-Covers the v0.3 Tier-A correctness fix: prior versions wired
-`vram_buffer_gb` into `model.pipe.enable_vram_management(...)`, but the
-real entrypoint is `model.enable_vram_management(...)` on UniVidX's
-pipeline class (vendor/UniVidX/src/pipelines/univid_*.py). The
-mis-targeted call silently no-op'd because `hasattr(model.pipe, "...")`
-returned False.
+Covers the v0.3 Tier-A correctness fixes:
+- The runtime invokes `model.pipe.enable_vram_management(vram_buffer=...)`.
+  `model.pipe` is an instance of UniVidX's OWN WanVideoPipeline subclass
+  (vendor/UniVidX/src/pipelines/univid_intrinsic.py:24, method at line
+  210), NOT UniVidIntrinsic itself and NOT DiffSynth's stock pipeline.
+- `vram_buffer` is part of the model cache key — distinct buffer values
+  produce distinct cache entries (was a real bug in 0.1.0–0.2.1 where
+  the key omitted it).
+- A missing method on `.pipe` (or a missing `.pipe`) gets a WARNING log
+  so a future upstream rename cannot silently no-op the way the prior
+  "deprecated, no-op" framing in 0.2.1 was misdiagnosed.
 
 Asserts:
-- load_model() calls model.enable_vram_management(vram_buffer=...) with
-  the value the caller passed, and on `model` itself (not model.pipe).
-- A class lacking the method gets a logged warning so the no-op is
-  visible, not silent.
+- load_model() calls model.pipe.enable_vram_management(vram_buffer=...)
+  with the value the caller passed.
+- A pipe lacking the method gets a logged warning, not silent skip.
 - Two loads with the same vram_buffer share a cache slot.
-- Two loads with different vram_buffer get distinct cache slots — the
-  knob actually controls what was passed to UniVidX.
+- Two loads with different vram_buffer get distinct cache slots.
 """
 from __future__ import annotations
 
@@ -32,37 +35,47 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 
+class _FakePipe:
+    """Stand-in for UniVidX's WanVideoPipeline subclass — the object
+    that lives at `model.pipe` and is the actual receiver of
+    enable_vram_management()."""
+
+    def __init__(self):
+        self.evm_calls: list[float] = []
+
+    def enable_vram_management(self, vram_buffer=0.5, **_kw):
+        self.evm_calls.append(float(vram_buffer))
+
+
 class _FakeUniVidModel:
-    """Mimics the surface area load_model() touches: a constructor that
-    accepts the kwargs UniVidX uses, a `train()` method, and the
-    enable_vram_management() entrypoint we're trying to reach."""
+    """Mimics the UniVidIntrinsic / UniVidAlpha surface area load_model
+    touches: constructor + train() + a `.pipe` attribute that carries
+    the real enable_vram_management entrypoint."""
 
     instance_count = 0
 
     def __init__(self, **kwargs):
         type(self).instance_count += 1
         self.init_kwargs = kwargs
-        self.evm_calls: list[float] = []
+        self.pipe = _FakePipe()
 
     def train(self, mode):
         return self
 
-    def enable_vram_management(self, vram_buffer=0.5, **_kw):
-        self.evm_calls.append(float(vram_buffer))
-
 
 class _FakeNoEVMModel:
     """Mimics a hypothetical upstream rev where enable_vram_management
-    was renamed/removed — the runtime should not crash, but should log."""
+    was renamed/removed on the pipe. The runtime should not crash but
+    should log a WARNING surfacing the no-op."""
 
     instance_count = 0
 
     def __init__(self, **kwargs):
         type(self).instance_count += 1
+        self.pipe = types.SimpleNamespace()  # no enable_vram_management
 
     def train(self, mode):
         return self
-    # deliberately no enable_vram_management
 
 
 @pytest.fixture
@@ -70,8 +83,8 @@ def stub_runtime(monkeypatch):
     """Stub every external dependency load_model touches: filesystem
     (resolve_paths), symlink setup (initialize), the chdir context
     (unividx_cwd), the mmgp safetensors patch, the SDPA un-polluter, and
-    UniVidX's MODEL_REGISTRY. Yields the fake model class so tests can
-    inspect it."""
+    UniVidX's MODEL_REGISTRY. Yields the fake registry so tests can
+    swap the registered class on demand."""
     from src import runtime
 
     runtime._MODEL_CACHE.clear()
@@ -106,25 +119,25 @@ def stub_runtime(monkeypatch):
     runtime._MODEL_CACHE.clear()
 
 
-def test_load_model_invokes_enable_vram_management_on_model(stub_runtime):
-    """The runtime must call enable_vram_management on `model` itself
-    (not model.pipe — that's DiffSynth's WanVideoPipeline which has no
-    such method) and pass the caller-supplied buffer value through."""
+def test_load_model_invokes_enable_vram_management_on_pipe(stub_runtime):
+    """The runtime must reach enable_vram_management THROUGH model.pipe
+    (UniVidX's own WanVideoPipeline subclass) and pass the caller-
+    supplied buffer value through."""
     from src.runtime import load_model
 
     model = load_model("intrinsic", vram_buffer=7.5)
-    assert model.evm_calls == [7.5], (
-        f"Expected enable_vram_management called once with 7.5, "
-        f"got {model.evm_calls!r}"
+    assert model.pipe.evm_calls == [7.5], (
+        f"Expected model.pipe.enable_vram_management called once with 7.5, "
+        f"got {model.pipe.evm_calls!r}"
     )
 
 
-def test_load_model_warns_when_model_lacks_enable_vram_management(
+def test_load_model_warns_when_pipe_lacks_enable_vram_management(
         stub_runtime, caplog):
-    """If a future upstream rev removes/renames enable_vram_management,
-    skipping silently would re-create the same bug we just fixed. The
-    runtime should log a warning so the no-op is visible in the user's
-    ComfyUI console."""
+    """If a future upstream rev removes/renames enable_vram_management
+    on the .pipe object, skipping silently would re-create the same
+    misdiagnosis that gave us the bogus 'deprecated, no-op' framing in
+    0.2.1. The runtime should log a WARNING."""
     from src.runtime import load_model
 
     stub_runtime.MODEL_REGISTRY["UniVidIntrinsic"] = _FakeNoEVMModel
@@ -136,7 +149,7 @@ def test_load_model_warns_when_model_lacks_enable_vram_management(
                 if "enable_vram_management" in r.message]
     assert matching, (
         "Expected a WARNING mentioning enable_vram_management when the "
-        "model class lacks the method; got log records: "
+        "pipe lacks the method; got log records: "
         f"{[r.message for r in caplog.records]}"
     )
 
@@ -163,5 +176,5 @@ def test_load_model_cache_miss_different_vram_buffer(stub_runtime):
     b = load_model("intrinsic", vram_buffer=12.0)
     assert a is not b
     assert _FakeUniVidModel.instance_count == 2
-    assert a.evm_calls == [4.0]
-    assert b.evm_calls == [12.0]
+    assert a.pipe.evm_calls == [4.0]
+    assert b.pipe.evm_calls == [12.0]

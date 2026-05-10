@@ -1,22 +1,35 @@
 # Changelog
 
-## 0.3.0-rc1 — 2026-05-11
+## 0.3.0 — 2026-05-11
 
-Tier-A correctness fixes from `ROADMAP_v0.3.md`. Tagged as a release candidate because the perf delta on real hardware (Tier A5) is pending re-bench; the code change is complete and unit-test-covered.
+Tier-A correctness fixes from `ROADMAP_v0.3.md`, **with the roadmap's root-cause diagnosis corrected mid-flight** (see "Diagnosis correction" below). The headline number from Tier A5: **`vram_buffer_gb` 4.0 vs 12.0 is +65% wall** (10.36 min → 17.10 min on baseline R2AIN_video, RTX 5090, no sage/compile) — making it the single biggest perf knob in the system, not the "deprecated" one 0.2.1 docs claimed.
+
+History note: this release ships as `0.3.0` after a transient buggy `0.3.0-rc1` (commit [`a73cdca`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/a73cdca)) followed the roadmap's misdiagnosis and retargeted the call from `model.pipe.enable_vram_management(...)` (correct) to `model.enable_vram_management(...)` (wrong — the method doesn't exist on the outer class). The retarget was reverted in commit [`1f04a9b`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/1f04a9b). Live-runtime sanity probe + 30-min bench in this commit confirm the corrected wiring on real hardware.
 
 ### Fixed
 
-- **`vram_buffer_gb` was a silent no-op in 0.1.0–0.2.1.** `src/runtime.py` called `model.pipe.enable_vram_management(vram_buffer=...)` — but `model.pipe` is DiffSynth's `WanVideoPipeline`, which has no such method. The `hasattr` guard returned False every time, so the call was skipped without logging. The actual entrypoint is `model.enable_vram_management(...)` on UniVidX's pipeline class (`vendor/UniVidX/src/pipelines/univid_intrinsic.py:210` and `univid_alpha.py:203`), which wraps text encoder + DiT + VAE through DiffSynth's low-level offload helper. The fix is a one-token change (`model.pipe` → `model`), wrapped in an `if/else` that logs `WARNING` when the method is genuinely absent (future upstream rev) so the no-op cannot recur silently.
-- **`vram_buffer` re-added to the cache key.** 0.2.0 removed it on the assumption it was dead, which was correct given the silent no-op. With the wiring fix above it's load-affecting again, so two loader nodes with different `vram_buffer_gb` settings now get distinct cache entries (previously: the second node silently inherited whichever value loaded first).
-- **Loader tooltip + README** drop the "DEPRECATED, no-op" framing. Tooltip now describes the actual mechanic (GB of free VRAM, controls layer streaming aggressiveness). The "What does NOT help on Blackwell" section no longer claims `vram_buffer_gb` is dead.
+- **`vram_buffer` re-added to the cache key.** 0.2.0 dropped it on the (mistaken) belief that the underlying call was a no-op, so two `UniVidXLoader` nodes with different `vram_buffer_gb` settings collided into a single cache entry — the second node silently inherited whichever value loaded first, contradicting its own UI. Restored to the tuple: `(variant, ckpt, device, dtype, float(vram_buffer), quantize_fp8, compile_dit, prefer_sage_attn)`.
+- **`if/else` with explicit WARNING-on-missing-method** around the `enable_vram_management` call. The original 0.2.1 code used a bare `hasattr` check that silently skipped if the method was missing — exactly the failure mode that led to the misdiagnosis the roadmap was written against (see below). New structure logs `INFO` on success ("VRAM management enabled with vram_buffer=4.0 GB") and `WARNING` if the method is genuinely absent (future upstream rev). A regression here will be visible in the ComfyUI console.
+- **Docs corrected.** Loader widget tooltip and README no longer claim `vram_buffer_gb` is "deprecated, no-op." The "What does NOT help on Blackwell" section drops the bullet. The Node Overview cache-key tuple lists `vram_buffer` explicitly.
+
+### Diagnosis correction (vs ROADMAP_v0.3.md)
+
+The roadmap claimed `vram_buffer_gb` was a silent no-op in 0.1.0–0.2.1 because `runtime.py` called `model.pipe.enable_vram_management(...)` and `model.pipe` was supposedly DiffSynth's stock `WanVideoPipeline` (no such method). **That diagnosis was wrong.** `model.pipe` is an instance of UniVidX's own `WanVideoPipeline` subclass defined locally at `vendor/UniVidX/src/pipelines/univid_intrinsic.py:24`, and `enable_vram_management()` is a method on that class at line 210 — exactly what the original code targeted. Live runtime probe (Tier-A1 sanity check) confirmed: after pointing the call at `model` per the roadmap, a `WARNING: Model class UniVidIntrinsic lacks enable_vram_management()` fired — proving the method does NOT exist on the outer class, contrary to the roadmap. The fix reverts to `model.pipe.enable_vram_management(...)` (the proven-working 0.2.1 target). What 0.3.0 actually fixes is **the cache-key bug + the doc inaccuracy**; the wiring was correct all along.
 
 ### Added
 
-- **4 new unit tests in `tests/test_runtime_cache_key.py`**: pins the new `enable_vram_management` target (model, not model.pipe), the WARNING log when the method is absent, the cache hit on identical `vram_buffer`, and the cache miss on distinct values. 35 → 39 unit tests.
+- **4 new unit tests in `tests/test_runtime_cache_key.py`**: pins `model.pipe.enable_vram_management(vram_buffer=...)` as the call target, asserts a WARNING fires when `.pipe` lacks the method, and asserts cache-hit/cache-miss behaviour for matching/distinct `vram_buffer` values. 35 → 39 unit tests.
+- **`examples/_bench_vram_buffer.py`** — wall + per-step measurement harness used to produce the +65% delta number. Queues both conditions back-to-back via `/prompt`, polls `/history` to completion, extracts timings from the status-messages timeline.
+- **`examples/_sanity_a1.py`** — one-shot tiny-workflow probe that confirms the corrected code is live by grepping the ComfyUI log for the new `VRAM management enabled with vram_buffer=4.0 GB` INFO line.
 
-### Pending before tagging `0.3.0`
+### Tier A5 measurement (RTX 5090, R2AIN_video baseline 480×640×21×20, no sage/compile)
 
-- **Tier A5 re-bench.** Now that `vram_buffer_gb` is load-affecting, the README perf table needs an honest measurement of `vram_buffer=4` vs `vram_buffer=12` on a 32 GB card. The RC ships with "perf Δ un-benched" in that table row; the final 0.3.0 tag will replace it with measured numbers. (Cannot reliably re-bench from an automated session — the run takes ~30 min and needs the user's GPU.)
+| `vram_buffer_gb` | Wall (server) | Δ |
+|---|---|---|
+| 4.0 | 10.36 min (621.6 s) | baseline |
+| 12.0 | 17.10 min (1026.1 s) | **+6.74 min / +65.1%** |
+
+Lower buffer = more residency = faster. 4.0 is near-optimal on 32 GB; raise only if you hit OOM. **Translation: in 0.1.0–0.2.1, anyone who saw the "deprecated, no-op" tooltip and left `vram_buffer_gb` at the default got lucky** — the call DID work, the docs just lied about it. Anyone who *raised* the value thinking it was inert was silently making their runs up to 65% slower.
 
 ## 0.2.1 — 2026-05-11
 
