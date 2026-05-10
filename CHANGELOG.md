@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.1 — 2026-05-11
+
+External-review fixes (h/t the second-pass code review against `4c1f282`):
+
+### Fixed
+
+- **Latent crash in alpha-variant + `prefer_sage_attn=True`.** UniVidX's vendored `wan_video_dit_alpha.py:133` calls `flash_attention(..., drop_out=drop_out)`, but our wrapper signature didn't accept `drop_out` — any alpha-mode run with sage enabled would have raised `TypeError`. Wrapper now accepts `drop_out=None` and `**_kwargs` defensively. (We never benched alpha-with-sage so the bug went undetected; latent.)
+- **Sage patch was missing the variant-specific CMSA modules.** UniVidIntrinsic / UniVidAlpha import their attention from `wan_video_dit_intrinsic` / `wan_video_dit_alpha`, NOT the base `wan_video_dit` we patched. The 0.2.0 measured 18 % sage win came from non-CMSA paths only (text cross-attention, single-modality self-attention). **Decision: continue NOT patching the CMSA modules** — they reshape K/V across the batch dimension via `repeat(batch_size, 1, 1, 1)` which mathematically would still be valid sage attention, but until we have a numerical-equivalence test we keep the CMSA path on the original SDPA implementation for safety. New regression test asserts the CMSA modules are NOT touched.
+- **`__init__.py` silent ImportError.** The `try/except ImportError` chain swallowed both errors with no log, so a real install bug (missing torch, broken submodule, etc.) made the nodes silently disappear from the ComfyUI sidebar with no clue why. Now logs both errors via the `unividx` logger.
+- **README cache-key drift.** Node Overview section claimed cache is `(variant, dtype, device, vram_buffer, ...)` but 0.2.0 explicitly removed `vram_buffer` from the key. Updated to match the actual tuple.
+- **README install.py drift.** Claimed `install.py` creates symlinks; it doesn't — it verifies the submodule, copies workflows, and prints download hints. The actual symlink/junction creation happens lazily at first model load via `runtime.initialize() → path_resolver.ensure_symlinks()`. Now documented accurately.
+
+### Added
+
+- 2 new regression tests in `tests/test_runtime_drop_out.py` pinning the `drop_out` kwarg acceptance + the variant-DiT patch-selection invariant.
+- README Roadmap → FP8: expanded into a 7-step refactor plan (split `dtype` into `compute_dtype` + `dit_weight_mode`, add pre-quantized weight loader bypassing the hardcoded BF16 six-shard loop, keep PEFT LoRAs in BF16, two-phase rollout for correctness then speed).
+
+### Known limitation (not fixed in this release)
+
+- **`unividx_cwd()` is process-global**, not thread-safe. Concurrent ComfyUI queue runs that both call `unividx_cwd()` will race on the process `cwd`. Realistic fix requires patching upstream UniVidX's hardcoded relative paths (out of scope) or a per-call `threading.Lock` (deferred). Documented; tracked in Roadmap.
+
 ## 0.2.0 — 2026-05-10
 
 ### Added

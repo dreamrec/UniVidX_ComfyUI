@@ -350,7 +350,16 @@ def _force_sage_over_fa2() -> bool:
     # support — only SDPA can handle them. We also pre-skip sage/FA2
     # for head_dim > 256 to avoid the per-call exception cost on
     # known-bad shapes.
-    def _wrapped_flash_attention(q, k, v, num_heads, compatibility_mode=False):
+    #
+    # `drop_out` and `**_kwargs` are accepted defensively: UniVidX's
+    # vendored wan_video_dit_intrinsic / wan_video_dit_alpha pass a
+    # drop_out kwarg through this signature for their CMSA routing
+    # (cross-batch K/V concat). We don't patch those CMSA modules by
+    # default (see the for-loop below), but if a future upstream rev
+    # routes through our function we want the call to succeed rather
+    # than fail with a TypeError on the unrecognised kwarg.
+    def _wrapped_flash_attention(q, k, v, num_heads, compatibility_mode=False,
+                                  drop_out=None, **_kwargs):
         head_dim = q.shape[-1] // num_heads
 
         if compatibility_mode or head_dim > 256:
@@ -392,13 +401,27 @@ def _force_sage_over_fa2() -> bool:
     # Patch DiffSynth's Wan DiT (used by the pipeline's main DiT).
     wan_video_dit.flash_attention = _wrapped_flash_attention
 
-    # ALSO patch UniVidX's vendored Wan DiT modules — they have their
-    # own copy of flash_attention() that defaults to SDPA when FA3 is
-    # absent (i.e. always on Blackwell). Their CMSA path goes through
-    # this function, not DiffSynth's. We patch BOTH intrinsic and alpha
-    # variants and only proceed if the modules are loaded.
+    # ALSO patch UniVidX's vendored base wan_video_dit module — its
+    # flash_attention() defaults to SDPA when FA3 is absent (always on
+    # Blackwell). UniVidIntrinsic and UniVidAlpha import their own
+    # variant-specific DiT modules (wan_video_dit_intrinsic /
+    # wan_video_dit_alpha) which we deliberately leave UNPATCHED:
+    #   - Both variant-specific modules call flash_attention with a
+    #     `drop_out` kwarg that gates CMSA (cross-modal self-attention)
+    #     routing — when active, K/V are reshaped across the batch
+    #     dimension via `rearrange(... -> 1 n (b s) d).repeat(b, 1, 1, 1)`
+    #     to make each batch element attend to every batch's K/V.
+    #   - Mathematically sage/FA2 would still compute correct attention
+    #     on the reshaped tensors, but the upstream behaviour is the
+    #     load-bearing definition of UniVidX's multi-modality attention.
+    #     Until we have a regression test pinning numerical equivalence
+    #     of sage vs SDPA on that exact pattern, we keep the CMSA path
+    #     on the original SDPA implementation for safety.
+    # The non-CMSA paths (text cross-attention, single-modality self-
+    # attention) still benefit from sage via the diffsynth and base
+    # wan_video_dit patches above.
     import sys as _sys
-    for mod_name in ("src.models.wan_video_dit", "src.models.wan_video_dit_alpha"):
+    for mod_name in ("src.models.wan_video_dit",):
         mod = _sys.modules.get(mod_name)
         if mod is None or not hasattr(mod, "flash_attention"):
             continue

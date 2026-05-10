@@ -125,7 +125,7 @@ Five nodes, all under the `UniVidX` category. Custom socket types — `UNIVIDX_M
 
 </td><td>
 
-**`UniVidXLoader`** — Loads `intrinsic` or `alpha` variant, exposes the perf knobs (`compile_dit`, `prefer_sage_attn`, `dtype`). Models are cached per `(variant, dtype, device, vram_buffer, fp8, compile, sage)` so toggling triggers a clean re-load.
+**`UniVidXLoader`** — Loads `intrinsic` or `alpha` variant, exposes the perf knobs (`compile_dit`, `prefer_sage_attn`, `dtype`). Models are cached per `(variant, ckpt, device, dtype, fp8_qtype, compile_dit, prefer_sage_attn)` so toggling triggers a clean re-load. The deprecated `vram_buffer_gb` is intentionally NOT in the key (it's a no-op on current DiffSynth, so including it would force spurious double-loads).
 
 </td></tr>
 <tr><td>
@@ -173,7 +173,7 @@ Five nodes, all under the `UniVidX` category. Custom socket types — `UNIVIDX_M
 | [Wan-AI/Wan2.1-T2V-14B](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B) | `ComfyUI/models/wan21_t2v_14b/` | ~69 GB |
 | [houyuanchen/UniVidX](https://huggingface.co/houyuanchen/UniVidX) | `ComfyUI/models/unividx/` | ~1.6 GB |
 
-`install.py` creates a Windows directory junction (or POSIX symlink) from `vendor/UniVidX/models/` to `ComfyUI/models/wan21_t2v_14b/`, plus hardlinks for the two LoRA adapters. Bridges UniVidX's hardcoded relative paths to ComfyUI's `models/` tree without forking upstream.
+`install.py` verifies the vendored UniVidX submodule is at the pinned commit, copies bundled demo workflows into ComfyUI's user workflow directory, and prints a hint about the model files you still need to download. The actual **path bridging** — Windows directory junction (or POSIX symlink) from `vendor/UniVidX/models/` to `ComfyUI/models/wan21_t2v_14b/`, plus hardlinks for the two LoRA adapters — happens **at runtime** on first model load via `src/path_resolver.ensure_symlinks()` (called from `runtime.initialize()`). This lazy approach lets the install step stay quick and avoids touching the filesystem if the user never queues a UniVidX workflow.
 
 ## Mode reference
 
@@ -189,7 +189,14 @@ For modes where a modality is a *condition*, the corresponding decoder output is
 
 Planned for the next iteration:
 
-- **FP8 via pre-quantized weights** (replaces the hung runtime-quantize path). Load FP8 safetensors directly from [Kijai/WanVideo_comfy](https://huggingface.co/Kijai/WanVideo_comfy) (`Wan2_1-T2V-14B_fp8_e4m3fn.safetensors`) instead of running `mmgp.offload.quantize()` on cold-load. Skips the ~22 min hang entirely; loader needs a code path that detects FP8 weights and routes around DiffSynth's BF16-by-default `WanVideoPipeline.from_pretrained`. Estimated ~14 GB DiT residency, ~30-40% additional speedup on top of `prefer_sage_attn`.
+- **FP8 via pre-quantized weights** (replaces the hung runtime-quantize path). The current `dtype=fp8_*` knob calls `mmgp.offload.quantize()` AFTER constructing a full BF16 DiT — which both hangs and destroys the main benefit (the BF16 cold load). Right design is a deeper refactor:
+  1. **Split the public knob** into `compute_dtype = {bf16, fp16}` and `dit_weight_mode = {bf16_shards, fp8_prequantized, fp8_runtime_experimental}` so users get clear choices and runtime quantization is hidden behind an explicit experimental flag.
+  2. **Add path resolution** for pre-quantized weights at `ComfyUI/models/diffusion_models/Wan2_1-T2V-14B_fp8_e4m3fn.safetensors` (Kijai/ComfyUI convention).
+  3. **Implement an alternate DiT loader** that bypasses upstream's hardcoded six-shard BF16 loop in [`vendor/UniVidX/src/pipelines/univid_intrinsic.py:447`](vendor/UniVidX/src/pipelines/univid_intrinsic.py) and `univid_alpha.py:425`. Instantiate `WanModel`, normalize key prefixes, stream-load FP8 safetensors, keep norms/bias/time/text/patch/head in BF16/FP32, and preserve scale tensors when present.
+  4. **Keep UniVidX LoRA adapters in BF16.** PEFT's dynamic `adapter_names=[...]` switching is central to UniVidX's per-modality routing — a generic FP8 `nn.Linear` substitution would break it.
+  5. **Phase 1 ("memory-safe FP8"):** FP8 base weights + BF16 LoRA + dequantize-or-scaled-linear base path. Correctness first.
+  6. **Phase 2 ("fast FP8"):** adapter-aware `_scaled_mm` for the base projection plus BF16 LoRA residuals. Needs a custom adapter-aware Linear or a real PEFT integration — not just Kijai's no-LoRA fast path.
+  7. **Validate** with the tiny R2AIN/R2PFB workflows first, then benchmark BF16 vs FP8 on cold-load time, peak VRAM, per-step time, and output sanity (per-modality SSIM/PSNR vs the BF16 reference).
 - **Step-distill LoRA stacking** — try [LightX2V's `Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors`](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v) on top of UniVidX's per-modality LoRA. Could close the small quality gap of the PREVIEW 4-step preset. Needs PEFT compatibility verification with UniVidX's `add_multiple_loras_to_model` machinery.
 - **DiffSynth `vram_limit` re-wire** — current diffsynth replaced `enable_vram_management` with `ModelConfig`-driven `vram_limit` + per-config `offload_dtype`/`onload_dtype`. Re-wire our `vram_buffer_gb` knob to the new API instead of the no-op `hasattr`-guarded legacy call.
 

@@ -11,18 +11,36 @@ Strategy A: opaque pipeline wrapper.
 #    environments — degrade to no node mappings rather than crashing
 #    the import. ComfyUI hosts always have torch, so this only matters
 #    in non-runtime contexts.
+import logging as _logging
+
+_log = _logging.getLogger("unividx")
+
 try:
     from .nodes.loader import UniVidXLoader
     from .nodes.task import UniVidXTaskMode
     from .nodes.sampler import UniVidXSampler
     from .nodes.decoder import UniVidXDecodeIntrinsic, UniVidXDecodeAlpha
-except ImportError:
+except ImportError as _exc_pkg:
     try:
         from nodes.loader import UniVidXLoader  # type: ignore
         from nodes.task import UniVidXTaskMode  # type: ignore
         from nodes.sampler import UniVidXSampler  # type: ignore
         from nodes.decoder import UniVidXDecodeIntrinsic, UniVidXDecodeAlpha  # type: ignore
-    except ImportError:
+    except ImportError as _exc_flat:
+        # Final fallback: degrade to no node mappings rather than
+        # crashing the whole custom-nodes import. This branch only
+        # fires in non-runtime contexts (CI without torch, etc.).
+        # SURFACE both errors so the user can see WHY their nodes
+        # didn't appear in the ComfyUI sidebar — the previous silent
+        # swallow made that nearly impossible to debug.
+        _log.warning(
+            "UniVidX_ComfyUI nodes failed to import; the ComfyUI "
+            "sidebar will not show them. This is expected in CI/lint "
+            "environments without torch, otherwise it indicates a "
+            "real install problem. "
+            "Package-import error: %s. Flat-import error: %s.",
+            _exc_pkg, _exc_flat,
+        )
         UniVidXLoader = None              # type: ignore[assignment]
         UniVidXTaskMode = None            # type: ignore[assignment]
         UniVidXSampler = None             # type: ignore[assignment]
