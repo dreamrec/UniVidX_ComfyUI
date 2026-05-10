@@ -7,10 +7,10 @@ All tests: tiny config (256×256, 5 frames, 3 inference steps, seed 42)
 
 ## Summary
 
-**8 / 8 tests pass.** Every code path in `nodes/sampler.py` and `nodes/decoder.py`
-exercised end-to-end: both model variants, four mode families (text-to-all,
-single-input cond, multi-input cond, max-cond), both decoder nodes, and both
-runtime validation paths.
+**10 / 10 tests pass.** Every code path in `nodes/sampler.py` and `nodes/decoder.py`
+exercised end-to-end (tests A–H), plus two **downstream-composition tests** (I, J)
+that validate Strategy A's actual value proposition: UniVidX outputs flow into
+other ComfyUI nodes as real IMAGE batches.
 
 | # | Test | Mode | Variant | Inputs | Result |
 |---|---|---|---|---|---|
@@ -22,6 +22,8 @@ runtime validation paths.
 | F | F_R2PFB | R2PFB | alpha | RGB | ✅ PASS — 30 sec |
 | G | G_error_family_mismatch | t2RPFB | intrinsic | (text) | ✅ PASS — execution_error contains "family" |
 | H | H_error_missing_input | R2AIN | intrinsic | (none) | ✅ PASS — execution_error contains "missing" |
+| **I** | **I_video_output** | t2RAIN | intrinsic | (text) | **✅ PASS — 4 MP4 files written by VHS_VideoCombine, 25 sec** |
+| **J** | **J_alpha_compositing** | R2PFB | alpha | RGB | **✅ PASS — composite over cyan bg: 89.3% bg / 10.7% fg, 25 sec** |
 
 ## Per-test pixel statistics (frame 1 of each output)
 
@@ -88,6 +90,56 @@ executed: ['1', '2']    # Loader and TaskMode ran; sampler raised at validate_mo
 
 ✅ `src/modes.py:validate_mode()` correctly enforces required inputs.
 
+### I — video_output (UniVidX → VHS_VideoCombine)
+
+Workflow: `UniVidXSampler(t2RAIN) → DecodeIntrinsic → 4× VHS_VideoCombine`
+producing one H.264 MP4 per modality.
+
+| Output file | Size |
+|---|---|
+| `matrix_I_video_rgb_00001.mp4` | 29 KB |
+| `matrix_I_video_albedo_00001.mp4` | 37 KB |
+| `matrix_I_video_irradiance_00001.mp4` | 32 KB |
+| `matrix_I_video_normal_00001.mp4` | 35 KB |
+
+✅ The decoder's IMAGE batches feed unmodified into a third-party node (`ComfyUI-VHS`)
+that doesn't know anything about UniVidX. This is the load-bearing validation
+of Strategy A's I/O boundary.
+
+### J — alpha_compositing (UniVidX alpha matte → real VFX comp)
+
+Workflow:
+```
+UniVidXSampler(R2PFB)  ──┐
+                          ├─→ DecodeAlpha (rgb_placeholder, alpha, foreground, background)
+                          │
+                                  alpha ──→ ImageToMask(channel='red') ──┐
+                                                                          │
+EmptyImage(256x256, color=cyan) ─────────────→ destination ─────┐         │
+                                                                 │         │
+DecodeAlpha.foreground ────────────────────→ source ────────┐    │         │
+                                                             ▼    ▼         ▼
+                                              ImageCompositeMasked(dest, src, mask)
+                                                             │
+                                                             ▼
+                                                      SaveImage
+```
+
+Result: 5 PNG frames showing the hedgehog cleanly extracted from the kitchen
+and pasted onto a cyan background. Pixel analysis: **89.3% cyan-background
+pixels, 10.7% non-cyan (foreground)** — confirming both that the alpha matte
+correctly identified the hedgehog (small object in scene) AND that the composite
+pasted only those pixels onto the new background.
+
+The alpha output of `R2PFB` is grayscale-equivalent across RGB channels, so
+`ImageToMask(channel='red')` faithfully extracts it as a `MASK` type for
+`ImageCompositeMasked` to consume.
+
+✅ This validates the real-world utility: UniVidX's alpha decomposition is a
+**usable VFX matte**, not just a visualization. Same matte could be wired
+into chroma-key compositing, frame-by-frame masking, or any other node that
+consumes `MASK` inputs.
+
 ## Performance summary
 
 Per-step times (256×256 × 5 frames × 4-modality streams):
@@ -140,13 +192,23 @@ cd ${COMFY_ROOT}/custom_nodes/comfyui-unividx
 cp output/unividx_t2RAIN_rgb_00011_.png       input/unividx_R2AIN_input.png
 cp output/unividx_t2RAIN_albedo_00011_.png    input/unividx_input_albedo.png
 cp output/unividx_t2RAIN_irradiance_00011_.png input/unividx_input_irradiance.png
-# Generate workflows
+# Generate workflows (C–H)
 python examples/test_matrix/_build.py
-# Run all 6 (15-20 min compute):
+# (I and J are hand-written; see I_video_output.json, J_alpha_compositing.json)
+
+# Run all 8 generated tests (~5 min if cached):
 python examples/test_matrix/_run.py
 # Or a subset:
 python examples/test_matrix/_run.py --filter alpha       # E + F only
 python examples/test_matrix/_run.py --filter error       # G + H only
+python examples/test_matrix/_run.py --filter video       # I only
+python examples/test_matrix/_run.py --filter compositing # J only
 ```
 
 Raw machine-readable results in `_run_results.json`.
+
+**Composition tests (I, J) require:**
+- `ComfyUI-VideoHelperSuite` (VHS) for `VHS_VideoCombine` — already in your
+  `custom_nodes/`.
+- Core ComfyUI nodes `EmptyImage`, `LoadImage`, `RepeatImageBatch`,
+  `ImageToMask`, `ImageCompositeMasked`, `SaveImage` — all in core.

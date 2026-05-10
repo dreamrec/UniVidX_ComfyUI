@@ -1,0 +1,79 @@
+{
+  "1": {
+    "class_type": "UniVidXLoader",
+    "inputs": {"variant": "intrinsic", "dtype": "bfloat16"}
+  },
+  "2": {
+    "class_type": "UniVidXTaskMode",
+    "inputs": {"mode": "t2RAIN"}
+  },
+  "3": {
+    "class_type": "UniVidXSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "task": ["2", 0],
+      "prompt": "a small hedgehog wearing a chef hat in a tiny kitchen",
+      "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清",
+      "num_inference_steps": 3,
+      "cfg_scale": 5.0,
+      "denoising_strength": 1.0,
+      "num_frames": 5,
+      "height": 256,
+      "width": 256,
+      "seed": 42,
+      "tiled": true
+    }
+  },
+  "4": {
+    "class_type": "UniVidXDecodeIntrinsic",
+    "inputs": {"result": ["3", 0]}
+  },
+  "5": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["4", 0],
+      "frame_rate": 8.0,
+      "loop_count": 0,
+      "filename_prefix": "matrix_I_video_rgb",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  },
+  "6": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["4", 1],
+      "frame_rate": 8.0,
+      "loop_count": 0,
+      "filename_prefix": "matrix_I_video_albedo",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  },
+  "7": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["4", 2],
+      "frame_rate": 8.0,
+      "loop_count": 0,
+      "filename_prefix": "matrix_I_video_irradiance",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  },
+  "8": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["4", 3],
+      "frame_rate": 8.0,
+      "loop_count": 0,
+      "filename_prefix": "matrix_I_video_normal",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

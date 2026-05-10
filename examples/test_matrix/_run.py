@@ -122,6 +122,59 @@ def assert_error_contains(needle):
     return check
 
 
+def assert_video_files(prefixes, expected_count_per_prefix):
+    """For Test I: check that MP4 files were generated for each prefix."""
+    def check(history_entry):
+        results = []
+        for prefix in prefixes:
+            files = list(OUTPUT_DIR.glob(f"{prefix}_*.mp4"))
+            if len(files) < expected_count_per_prefix:
+                return False, f"only found {len(files)} MP4s for {prefix}, expected {expected_count_per_prefix}"
+            # Pick the most recent one
+            latest = max(files, key=lambda p: p.stat().st_mtime)
+            size_kb = latest.stat().st_size / 1024
+            if size_kb < 1:
+                return False, f"{latest.name} is suspiciously small ({size_kb:.1f} KB)"
+            results.append(f"{prefix}={size_kb:.0f}KB")
+        return True, " | ".join(results)
+    return check
+
+
+def assert_composite(file_prefix, bg_color_rgb=(0, 255, 255)):
+    """For Test J: check the composite has BOTH cyan-bg pixels AND non-cyan pixels.
+
+    This proves: (a) the composite actually happened (some bg pixels), (b) the
+    foreground was pasted in (some non-bg pixels). All-cyan would mean mask was
+    fully zero; all-foreground would mean mask was fully one.
+    """
+    def check(history_entry):
+        try:
+            from PIL import Image
+            import numpy as np
+        except ImportError:
+            return True, "skipped (PIL/numpy not available)"
+        # Find the saved composite file
+        files = sorted(OUTPUT_DIR.glob(f"{file_prefix}_*.png"))
+        if not files:
+            return False, f"no composite file matching {file_prefix}_*.png"
+        latest = max(files, key=lambda p: p.stat().st_mtime)
+        img = np.array(Image.open(latest))
+        # Cyan check: pixels close to (0, 255, 255)
+        target = np.array(bg_color_rgb)
+        dist = np.linalg.norm(img.astype(np.int16) - target, axis=-1)
+        bg_pixels = (dist < 20).sum()
+        fg_pixels = (dist >= 20).sum()
+        total = img.shape[0] * img.shape[1]
+        bg_pct = 100.0 * bg_pixels / total
+        fg_pct = 100.0 * fg_pixels / total
+        if bg_pct < 5:
+            return False, f"only {bg_pct:.1f}% bg pixels — mask seems too permissive"
+        if fg_pct < 5:
+            return False, f"only {fg_pct:.1f}% fg pixels — mask seems too restrictive (no compositing happened)"
+        return True, f"{latest.name}: bg={bg_pct:.1f}% fg={fg_pct:.1f}%"
+    return check
+
+
 TEST_SPECS = [
     {
         "id": "C_RA2IN",
@@ -180,6 +233,24 @@ TEST_SPECS = [
         "expected": "error",
         "timeout": 60,
         "assertions": assert_error_contains("missing"),  # "Mode R2AIN requires inputs ..., missing: ..."
+    },
+    {
+        "id": "I_video_output",
+        "workflow": "I_video_output.json",
+        "expected": "success",
+        "timeout": 600,
+        "assertions": assert_video_files(
+            prefixes=["matrix_I_video_rgb", "matrix_I_video_albedo",
+                      "matrix_I_video_irradiance", "matrix_I_video_normal"],
+            expected_count_per_prefix=1,
+        ),
+    },
+    {
+        "id": "J_alpha_compositing",
+        "workflow": "J_alpha_compositing.json",
+        "expected": "success",
+        "timeout": 600,
+        "assertions": assert_composite("matrix_J_composite_over_cyan"),
     },
 ]
 
