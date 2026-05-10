@@ -25,13 +25,17 @@ EXAMPLES = ROOT / "examples"
 # stable upstream).
 PINNED_UNIVIDX_COMMIT = "382b9002757f4d5f04a90ec23b784dce11d56221"
 
-# Demo workflow JSONs that get copied into the user's workflow directory so
-# they appear in the ComfyUI sidebar without manual import.
+# UI-format demo workflow JSONs that get copied into the user's workflow
+# directory so they appear in the ComfyUI sidebar without manual import.
+# Only UI-format files (with `nodes` + `groups` arrays) belong here — the
+# *_api.json files are programmatic-queue payloads and are skipped.
+# `R2AIN_basic.json` and `R2PFB_basic.json` were removed in 0.2.0; the
+# replacement video-conditioned workflows ship as API-format only
+# (`R2AIN_video_api.json` / `R2PFB_video_api.json`) and are intentionally
+# omitted from auto-copy — users drop them on the canvas manually.
 DEMO_WORKFLOW_NAMES = (
     "t2RAIN_basic.json",          # text -> RGB+A+I+N (intrinsic)
-    "R2AIN_basic.json",           # RGB-conditioned intrinsic
     "t2RPFB_basic.json",          # text -> R+P+F+B (alpha)
-    "R2PFB_basic.json",           # RGB-conditioned alpha (sharp matte)
     "I_video_output.json",        # t2RAIN -> 4x MP4 via VHS_VideoCombine
     "J_alpha_compositing.json",   # R2PFB matte -> ImageCompositeMasked
 )
