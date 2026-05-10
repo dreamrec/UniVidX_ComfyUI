@@ -115,6 +115,19 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             # Switch to inference mode (equivalent to model.eval()).
             model.train(False)
 
+            # Enable layer-by-layer VRAM management. The Wan2.1-T2V-14B DiT is
+            # ~28 GB FP16; on a 32 GB GPU the model alone would saturate VRAM
+            # and leave no headroom for activations / KV cache / VAE decode.
+            # DiffSynth-Studio's enable_vram_management wraps Linear/Conv/Norm
+            # modules so they live on CPU and stream to GPU only during forward.
+            # vram_buffer=4.0 keeps ~4 GB free for activations.
+            #
+            # Tunable: pass a smaller buffer for more headroom (slower per step
+            # but leaves room for a higher resolution). Pass num_persistent_param_in_dit
+            # to keep a specific number of DiT params resident.
+            if hasattr(model, "pipe") and hasattr(model.pipe, "enable_vram_management"):
+                model.pipe.enable_vram_management(vram_buffer=4.0)
+
         _MODEL_CACHE[cache_key] = model
         return model
 
