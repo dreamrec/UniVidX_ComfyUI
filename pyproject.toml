@@ -1,0 +1,43 @@
+[project]
+name = "unividx-comfyui"
+description = "UniVidX intrinsic & alpha video decomposition for ComfyUI"
+version = "0.1.0"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">= 3.10"
+dependencies = [
+    "torch>=2.7",
+    "torchvision>=0.22",
+    "transformers>=4.38",
+    "imageio[ffmpeg]>=2.31",
+    "safetensors>=0.4",
+    "einops>=0.7",
+    "sentencepiece>=0.1.99",
+    "protobuf>=3.20",
+    "modelscope>=1.13",
+    "ftfy>=6.1",
+    "pandas>=2.0",
+    "accelerate>=0.27",
+    "peft>=0.10",
+    "datasets>=2.14",
+    "huggingface_hub>=0.20",
+    "diffsynth>=2.0",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/dreamrec/UniVidX_ComfyUI"
+Repository = "https://github.com/dreamrec/UniVidX_ComfyUI"
+Documentation = "https://github.com/dreamrec/UniVidX_ComfyUI#readme"
+"Bug Tracker" = "https://github.com/dreamrec/UniVidX_ComfyUI/issues"
+
+[tool.comfy]
+PublisherId = "dreamrec"
+DisplayName = "UniVidX Intrinsic & Alpha Decomposition"
+requires-comfyui = ">=0.20.0"
