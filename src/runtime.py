@@ -11,6 +11,7 @@ Responsibilities:
   multi-node graphs don't reload weights.
 """
 import contextlib
+import json
 import os
 import sys
 import threading
@@ -89,7 +90,8 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             # value is a JSON-string-of-a-list — that's how UniVidX parses it.
             t5 = paths["wan_t5"]
             vae = paths["wan_vae"]
-            model_paths_json = f'["{t5}","{vae}"]'
+            # json.dumps so Windows backslashes are escaped — UniVidX json.loads's this string.
+            model_paths_json = json.dumps([t5, vae])
 
             modalities = ["rgb", "albedo", "irradiance", "normal"] if variant == "intrinsic" \
                          else ["com", "pha", "fgr", "bgr"]
