@@ -83,6 +83,14 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
         with unividx_cwd():
             from scripts.registry import MODEL_REGISTRY  # type: ignore
 
+            # mmgp monkey-patches safetensors.torch.load_file with a writable_tensors=True
+            # default. On Windows that uses ACCESS_COPY mmap, which forces a virtual-memory
+            # commit equal to the file size. Six 9.84 GB DiT shards mmapped concurrently
+            # blow past most users' paging file -> [WinError 1455]. UniVidX only ever
+            # reads the loaded tensors (state_dict.update + load_state_dict), so a read-
+            # only mmap is sufficient and skips the commit charge.
+            _patch_unividx_load_file_to_readonly()
+
             cls_name = "UniVidIntrinsic" if variant == "intrinsic" else "UniVidAlpha"
             ModelCls = MODEL_REGISTRY[cls_name]
 
@@ -109,6 +117,32 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
 
         _MODEL_CACHE[cache_key] = model
         return model
+
+
+def _patch_unividx_load_file_to_readonly() -> None:
+    """
+    Replace UniVidX's load_file binding so it uses mmgp.torch_load_file with
+    writable_tensors=False. Idempotent. Called inside the unividx_cwd context
+    after registry import (which imports the pipeline modules).
+    """
+    import sys as _sys
+    try:
+        import mmgp.safetensors2 as _mmgp_st
+    except ImportError:
+        return  # mmgp not installed — nothing to patch
+
+    def _readonly_load_file(filename, device="cpu"):
+        return _mmgp_st.torch_load_file(filename, device=device, writable_tensors=False)
+    _readonly_load_file._unividx_readonly_patch = True  # type: ignore[attr-defined]
+
+    for mod_name in ("src.pipelines.univid_intrinsic", "src.pipelines.univid_alpha"):
+        mod = _sys.modules.get(mod_name)
+        if mod is None:
+            continue
+        existing = getattr(mod, "load_file", None)
+        if getattr(existing, "_unividx_readonly_patch", False):
+            continue
+        mod.load_file = _readonly_load_file
 
 
 def clear_cache() -> None:
