@@ -213,20 +213,44 @@ python -c "import flash_attn_interface; print('FA3 OK')"
 
 ### Honest stack: what actually moves the needle
 
-All numbers below are measured on the same workflow (R2AIN, 480×640×21f, 20 steps, BF16, RTX 5090) unless marked *expected*.
+All numbers below are **measured** on the same workflow (R2AIN, 480×640×21f, 20 steps, BF16, RTX 5090) unless marked *expected*.
 
-| Change | Wall time | Per-step | Δ vs baseline | Notes |
+| Config | Wall time | Per-step | Δ vs baseline | Notes |
 |---|---|---|---|---|
 | **Baseline** (defaults) | 17.6 min | ~43.8 s | — | Includes ~3 min cold-load |
 | `vram_buffer_gb` 4 → 12 | 16.6 min | ~43 s | **–6% (noise)** | Widget is a no-op on current diffsynth |
-| `compile_dit = True` | **14.55 min** | **~31.6 s** | **–17% wall, –28% per-step** | First-step pays ~90 s compile capture |
-| Install Flash Attention 3 | *expected ~12-13 min* | *~28-30 s* | *–25-30%* | Auto-picked over FA2; install once |
-| `compile_dit` + FA3 (stacked) | *expected ~10 min* | *~22 s* | *–43%* | Independent multipliers stack |
-| FP8 quant (when stable) | *expected ~9-11 min* | *~20-25 s* | *–35-50%* | Quanto+LoRA combo hung in our test |
-| Full stack (compile + FA3 + FP8) | *target ~6-8 min* | *~15-18 s* | *–60-70%* | Three independent wins |
-| `cfg_scale = 1.0` (RGB-conditioned only) | *further 2× on top* | *halved* | *additional –50%* | Single forward per step instead of two; mild quality cost |
+| **`compile_dit = True`** | **14.55 min** | **~31.6 s** | **–17% wall, –28% per-step** | First-step pays ~90 s compile capture |
+| **`prefer_sage_attn = True`** | **14.49 min** | **~34.5 s** | **–18% wall, –21% per-step** | Quality verified visually equivalent to FA2 |
+| Both stacked (`compile_dit` + `prefer_sage_attn`) | 14.99 min | ~33 s | **–15% (slightly worse than either alone!)** | The two wins target the same per-step DiT compute and don't compose |
+| FP8 quant (`fp8_e4m3fn`) | *not measured* | *unknown* | *unknown* | Quanto pass over Wan2.1-14B + UniVidX LoRA stack hung after ~22 min in our cold-load test |
+| `cfg_scale = 1.0` (RGB-conditioned only) | *further ~2× on top* | *halved* | *additional –50%* | Single forward per step instead of two; mild quality cost on text-only modes, OK on RGB-conditioned |
 
-**For longer runs the compile win dominates further** — at 50 steps the ~90 s compile overhead amortizes to ~1.8 s/step, making the ~28% per-step gain show up as ~25% wall reduction. Compile is unambiguously worth it for any run over ~15 steps.
+**Recommendation: pick ONE of `compile_dit` or `prefer_sage_attn`, not both.** They overlap on the same bottleneck. `prefer_sage_attn` has the slight wall edge and no warmup cost (`compile_dit` pays ~90 s graph capture on the first sampler step). For longer runs (50+ steps) the compile gain compounds further as the warmup amortizes. Visual quality verified identical to FA2 baseline on the test clip's albedo / irradiance / normal outputs.
+
+### Installing SageAttention (for `prefer_sage_attn=True`)
+
+The `prefer_sage_attn` knob is a no-op unless [SageAttention](https://github.com/thu-ml/SageAttention) is installed in your ComfyUI venv. PyPI ships only sage 1.0.6 (head_dim restricted to {64,96,128}, Hopper/Ada-tuned only). For Blackwell + Windows + Python 3.12 + PyTorch 2.7, use the **prebuilt wheel from [woct0rdho/SageAttention](https://github.com/woct0rdho/SageAttention/releases)**:
+
+```bash
+# In your ComfyUI venv:
+pip install "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows/sageattention-2.2.0+cu128torch2.7.1-cp312-cp312-win_amd64.whl"
+```
+
+Match the wheel to your stack: cu128 / cu130 (CUDA toolkit), torch2.7.1 / torch2.8.0 (PyTorch minor), cp310/cp311/cp312/cp313 (Python). Linux wheels available too; for source builds see [woct0rdho's BUILD_STORY](https://github.com/mobcat40/sageattention-blackwell/blob/main/BUILD_STORY.md).
+
+> **CAUTION — `ComfyUI-3D-Pack` SDPA pollution.** Installing `sageattention` triggers ComfyUI-3D-Pack's `Stable3DGen/trellis/backend_config.py` to globally swap `torch.nn.functional.scaled_dot_product_attention = sageattn` at module import. That pollution breaks any other custom node that uses SDPA with head_dim outside sage's supported set — UniVidX's VAE is one such case (1-head SDPA where head_dim=channel_count, hits 384). Our `runtime.load_model()` calls `_restore_native_sdpa_if_polluted()` defensively on every load to undo the pollution. If you have other custom nodes that broke after installing sage, this defensive un-pollute is why — and the same pattern would fix them.
+
+### Other levers (unmeasured)
+
+- **Install Flash Attention 3** — *Hopper-only, doesn't help RTX 5090 (sm_120).* The earlier README claim was wrong for Blackwell. FA4 supports Blackwell but is Linux-wheels-only on PyPI and uses a different module name (`flash_attn.cute`) that DiffSynth's Wan DiT doesn't auto-detect.
+- **`cfg_scale = 1.0`** in the sampler — disables CFG, skipping one forward pass per step. ~2× speedup. Quality OK for RGB-conditioned modes (`R2AIN`, `R2PFB`); weakens text-only modes noticeably.
+- **Lower `num_inference_steps`** — UniVidX uses `FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True)`, no DPM++ swap available. Step count scales linearly: 15 vs 20 saves 25% with mild quality drop, 10 vs 20 saves 50% with notable drop.
+- **[LightX2V Wan2.1-T2V-14B-StepDistill-CfgDistill LoRA](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill)** — community step-distillation LoRA targeting 4 steps with no CFG. Claimed ~20× wall speedup on Wan2.1, ~42× stacked with FP8. Drop-in (just an extra LoRA load), but quality on UniVidX's intrinsic/alpha modalities is unverified (the distillation was done on RGB output).
+- **[kijai/ComfyUI-WanVideoWrapper](https://github.com/kijai/ComfyUI-WanVideoWrapper)** — alternative ComfyUI wrapper for Wan2.1 with finer-grained controls (per-block CPU swap, async prefetch, dedicated torch.compile node). Different model loader, would need separate integration to use with UniVidX.
+
+### Honest summary
+
+The validated wins on this stack today: **17-18% wall (~3 min off a 17.6 min baseline) from either `compile_dit` or `prefer_sage_attn` — pick one.** Higher-tier stacked speedups exist in theory but are blocked by either (a) Hopper-only requirements that don't apply to Blackwell consumer cards, (b) source-build complexity on Windows, or (c) upstream API gaps in DiffSynth + UniVidX vs newer attention backends.
 
 The README previously claimed ~30 sec/step with VRAM management; that number was true under an older diffsynth version that exposed `enable_vram_management(vram_buffer=...)` on `WanVideoPipeline`. The current diffsynth removed that API — our runtime call is `hasattr`-guarded and silently no-ops, which is why the per-step is now ~43 sec rather than ~30 sec. The right fix is FA3 + compile, not the (now-cosmetic) vram_buffer knob.
 

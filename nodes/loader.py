@@ -58,6 +58,21 @@ class UniVidXLoader:
                         "tuple so toggling triggers a re-load + re-compile."
                     ),
                 }),
+                "prefer_sage_attn": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": (
+                        "If True (and `sageattention` is installed in the "
+                        "ComfyUI venv), monkey-patch DiffSynth's Wan DiT "
+                        "attention chain so SageAttention wins over Flash "
+                        "Attention 2. SageAttention's INT8-quantized "
+                        "attention is typically faster on Hopper/Blackwell "
+                        "(claimed 2-5x by upstream, our measurements vary). "
+                        "On Blackwell (sm_120) FA3 isn't available — FA2 "
+                        "is the default winner — so this flag is the "
+                        "main attention-backend lever. No-op if "
+                        "sageattention isn't installed."
+                    ),
+                }),
                 "vram_buffer_gb": ("FLOAT", {
                     "default": 4.0, "min": 0.0, "max": 96.0, "step": 0.5,
                     "tooltip": (
@@ -79,7 +94,8 @@ class UniVidXLoader:
     CATEGORY = "UniVidX"
 
     def load(self, variant: str, dtype: str,
-             compile_dit: bool = False, vram_buffer_gb: float = 4.0):
+             compile_dit: bool = False, prefer_sage_attn: bool = False,
+             vram_buffer_gb: float = 4.0):
         # FP8 path: load as bfloat16 (UniVidX construction is hardcoded BF16),
         # then post-quantize the DiT via mmgp/optimum-quanto.
         fp8_variant = {"fp8_e4m3fn": "qfloat8", "fp8_e5m2": "qfloat8_e5m2"}.get(dtype)
@@ -89,5 +105,6 @@ class UniVidXLoader:
         model = load_model(variant, device="cuda", dtype=compute_dtype,
                            vram_buffer=float(vram_buffer_gb),
                            quantize_fp8=fp8_variant,
-                           compile_dit=bool(compile_dit))
+                           compile_dit=bool(compile_dit),
+                           prefer_sage_attn=bool(prefer_sage_attn))
         return ((model, variant),)

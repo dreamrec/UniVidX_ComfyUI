@@ -63,7 +63,7 @@ def unividx_cwd():
 
 def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch.bfloat16,
                vram_buffer: float = 4.0, quantize_fp8: str | None = None,
-               compile_dit: bool = False):
+               compile_dit: bool = False, prefer_sage_attn: bool = False):
     """
     Load (or return from cache) UniVidIntrinsic or UniVidAlpha.
 
@@ -95,13 +95,23 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
     paths = resolve_paths(_comfy_root())
     ckpt = paths[f"univid_{variant}_ckpt"]
     cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
-                 quantize_fp8, bool(compile_dit))
+                 quantize_fp8, bool(compile_dit), bool(prefer_sage_attn))
 
     with _LOAD_LOCK:
         if cache_key in _MODEL_CACHE:
             return _MODEL_CACHE[cache_key]
 
         initialize()
+
+        # Always undo any global F.scaled_dot_product_attention pollution
+        # done by other custom nodes (Stable3DGen monkey-patches it to
+        # sage at import time when sageattention is installed). UniVidX's
+        # VAE has 1-head SDPA where head_dim=channel_count which hits 384
+        # in some blocks — sage raises ValueError on that, taking down
+        # the entire run. We restore native SDPA on every load_model
+        # call to stay self-healing.
+        _restore_native_sdpa_if_polluted()
+
         with unividx_cwd():
             from scripts.registry import MODEL_REGISTRY  # type: ignore
 
@@ -153,6 +163,14 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             # precision. On a 32 GB GPU the FP8 DiT (~14 GB) fits fully
             # resident, so we also drop the VRAM buffer to 0.0 (no need
             # to stream when everything's already on-chip).
+            # Apply the SageAttention dispatcher AFTER model construction
+            # so UniVidX's vendored wan_video_dit modules are imported
+            # and present in sys.modules — they have their own
+            # flash_attention() copy that the CMSA path uses, separate
+            # from DiffSynth's. We patch both.
+            if prefer_sage_attn:
+                _force_sage_over_fa2()
+
             if quantize_fp8:
                 _quantize_dit_fp8(model, qtype=quantize_fp8)
 
@@ -209,6 +227,136 @@ def _compile_dit(model) -> None:
             "structure may have changed."
         )
     model.pipe.dit = torch.compile(dit, mode="reduce-overhead", dynamic=True, fullgraph=False)
+
+
+def _restore_native_sdpa_if_polluted() -> bool:
+    """Defensive: undo Stable3DGen's global F.scaled_dot_product_attention
+    pollution.
+
+    ComfyUI-3D-Pack's `Stable3DGen/trellis/backend_config.py` does
+    `F.scaled_dot_product_attention = sageattn` at import time IF the
+    `sageattention` package is importable. That hostile global swap
+    breaks every other custom node that uses SDPA with head_dim outside
+    sage's supported set (UniVidX's VAE has 1-head SDPA where
+    head_dim=channel_count, hitting 384 in some block — sage raises
+    Unsupported head_dim).
+
+    `torch._C._nn.scaled_dot_product_attention` is the underlying C++
+    implementation and is NOT touched by the Python-level swap, so we
+    use it as the trusted reference for restoration. Idempotent: if
+    F.SDPA is already native, this is a no-op.
+
+    Returns True if a restore happened, False if no pollution detected.
+    """
+    import torch
+    import torch.nn.functional as F
+    native = torch._C._nn.scaled_dot_product_attention
+    if F.scaled_dot_product_attention is native:
+        return False
+    F.scaled_dot_product_attention = native
+    return True
+
+
+def _force_sage_over_fa2() -> bool:
+    """Replace DiffSynth's Wan DiT attention with a SageAttention-first
+    wrapper that falls back to FA2 (then SDPA) per-call.
+
+    DiffSynth's stock `flash_attention()` is a hardcoded elif-chain:
+    FA3 > FA2 > SAGE > SDPA. Two problems on Blackwell + sage 1.x:
+      1. FA2 wins by default (FA3 is Hopper-only).
+      2. SageAttention 1.x only supports head_dim in {64, 96, 128}; the
+         Wan2.1-14B + UniVidX stack has at least one attention call
+         with a different head_dim (cross-attention vs the T5 text
+         encoder, typically), and sage raises hard if asked to handle
+         it.
+
+    We swap in our own function that:
+      - tries SageAttention when head_dim ∈ {64, 96, 128}
+      - falls back to FA2 for any other head_dim
+      - falls back to torch SDPA if FA2 isn't available either
+
+    Returns True if the wrapper was installed, False otherwise.
+    """
+    try:
+        import sageattention  # noqa: F401
+        from sageattention import sageattn
+    except ImportError:
+        return False
+    try:
+        from diffsynth.models import wan_video_dit
+    except ImportError:
+        return False
+    if not getattr(wan_video_dit, "SAGE_ATTN_AVAILABLE", False):
+        return False
+
+    import torch.nn.functional as F
+    from einops import rearrange
+
+    # Capture FA2 reference if present so we can use it as the fallback.
+    _FA2 = None
+    if getattr(wan_video_dit, "FLASH_ATTN_2_AVAILABLE", False):
+        try:
+            import flash_attn
+            _FA2 = flash_attn.flash_attn_func
+        except ImportError:
+            _FA2 = None
+
+    # Cascading attention dispatcher: try sage → try FA2 → SDPA last.
+    # Each backend is wrapped in try/except because UniVidX's CMSA
+    # uses head_dim values (e.g. 384) that neither sage nor FA2
+    # support — only SDPA can handle them. We also pre-skip sage/FA2
+    # for head_dim > 256 to avoid the per-call exception cost on
+    # known-bad shapes.
+    def _wrapped_flash_attention(q, k, v, num_heads, compatibility_mode=False):
+        head_dim = q.shape[-1] // num_heads
+
+        if compatibility_mode or head_dim > 256:
+            q2 = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+            k2 = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+            v2 = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+            x = F.scaled_dot_product_attention(q2, k2, v2)
+            return rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+
+        try:
+            q2 = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+            k2 = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+            v2 = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+            x = sageattn(q2, k2, v2)
+            return rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+        except Exception:
+            pass
+
+        if _FA2 is not None:
+            try:
+                q2 = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
+                k2 = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
+                v2 = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
+                x = _FA2(q2, k2, v2)
+                return rearrange(x, "b s n d -> b s (n d)", n=num_heads)
+            except Exception:
+                pass
+
+        q2 = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+        k2 = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+        v2 = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+        x = F.scaled_dot_product_attention(q2, k2, v2)
+        return rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+
+    # Patch DiffSynth's Wan DiT (used by the pipeline's main DiT).
+    wan_video_dit.flash_attention = _wrapped_flash_attention
+
+    # ALSO patch UniVidX's vendored Wan DiT modules — they have their
+    # own copy of flash_attention() that defaults to SDPA when FA3 is
+    # absent (i.e. always on Blackwell). Their CMSA path goes through
+    # this function, not DiffSynth's. We patch BOTH intrinsic and alpha
+    # variants and only proceed if the modules are loaded.
+    import sys as _sys
+    for mod_name in ("src.models.wan_video_dit", "src.models.wan_video_dit_alpha"):
+        mod = _sys.modules.get(mod_name)
+        if mod is None or not hasattr(mod, "flash_attention"):
+            continue
+        mod.flash_attention = _wrapped_flash_attention
+    return True
 
 
 def _quantize_dit_fp8(model, qtype: str = "qfloat8") -> None:
