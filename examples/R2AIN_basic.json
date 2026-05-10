@@ -1,8 +1,8 @@
 {
-  "id": "unividx_x_t2rain_(text_->_rgb/a/i/n)",
+  "id": "unividx_x_r2ain_(rgb_->_a/i/n)",
   "revision": 0,
-  "last_node_id": 8,
-  "last_link_id": 7,
+  "last_node_id": 10,
+  "last_link_id": 9,
   "nodes": [
     {
       "id": 1,
@@ -66,14 +66,89 @@
         "Node name for S&R": "UniVidXTaskMode"
       },
       "widgets_values": [
-        "t2RAIN"
+        "R2AIN"
       ]
     },
     {
       "id": 3,
-      "type": "UniVidXSampler",
+      "type": "LoadImage",
       "pos": [
         560,
+        120
+      ],
+      "size": [
+        320,
+        320
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            3
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "unividx_R2AIN_input.png",
+        "image"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "RepeatImageBatch",
+      "pos": [
+        560,
+        540
+      ],
+      "size": [
+        320,
+        80
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            4
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RepeatImageBatch"
+      },
+      "widgets_values": [
+        21
+      ]
+    },
+    {
+      "id": 5,
+      "type": "UniVidXSampler",
+      "pos": [
+        1040,
         120
       ],
       "size": [
@@ -81,7 +156,7 @@
         720
       ],
       "flags": {},
-      "order": 2,
+      "order": 4,
       "mode": 0,
       "inputs": [
         {
@@ -97,7 +172,8 @@
         {
           "name": "rgb",
           "type": "IMAGE",
-          "shape": 7
+          "shape": 7,
+          "link": 4
         },
         {
           "name": "albedo",
@@ -135,7 +211,7 @@
           "name": "result",
           "type": "UNIVIDX_RESULT",
           "links": [
-            3
+            5
           ],
           "slot_index": 0
         }
@@ -158,10 +234,10 @@
       ]
     },
     {
-      "id": 4,
+      "id": 6,
       "type": "UniVidXDecodeIntrinsic",
       "pos": [
-        1140,
+        1620,
         120
       ],
       "size": [
@@ -169,13 +245,13 @@
         150
       ],
       "flags": {},
-      "order": 3,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {
           "name": "result",
           "type": "UNIVIDX_RESULT",
-          "link": 3
+          "link": 5
         }
       ],
       "outputs": [
@@ -183,7 +259,7 @@
           "name": "rgb",
           "type": "IMAGE",
           "links": [
-            4
+            6
           ],
           "slot_index": 0
         },
@@ -191,7 +267,7 @@
           "name": "albedo",
           "type": "IMAGE",
           "links": [
-            5
+            7
           ],
           "slot_index": 1
         },
@@ -199,7 +275,7 @@
           "name": "irradiance",
           "type": "IMAGE",
           "links": [
-            6
+            8
           ],
           "slot_index": 2
         },
@@ -207,7 +283,7 @@
           "name": "normal",
           "type": "IMAGE",
           "links": [
-            7
+            9
           ],
           "slot_index": 3
         }
@@ -218,69 +294,11 @@
       "widgets_values": []
     },
     {
-      "id": 5,
-      "type": "SaveImage",
-      "pos": [
-        1580,
-        120
-      ],
-      "size": [
-        320,
-        280
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 4
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "SaveImage"
-      },
-      "widgets_values": [
-        "unividx_t2RAIN_rgb"
-      ]
-    },
-    {
-      "id": 6,
-      "type": "SaveImage",
-      "pos": [
-        1580,
-        500
-      ],
-      "size": [
-        320,
-        280
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 5
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "SaveImage"
-      },
-      "widgets_values": [
-        "unividx_t2RAIN_albedo"
-      ]
-    },
-    {
       "id": 7,
       "type": "SaveImage",
       "pos": [
-        1580,
-        880
+        2060,
+        120
       ],
       "size": [
         320,
@@ -301,15 +319,15 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_irradiance"
+        "unividx_R2AIN_rgb_placeholder"
       ]
     },
     {
       "id": 8,
       "type": "SaveImage",
       "pos": [
-        1580,
-        1260
+        2060,
+        500
       ],
       "size": [
         320,
@@ -330,7 +348,65 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_normal"
+        "unividx_R2AIN_albedo"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "SaveImage",
+      "pos": [
+        2060,
+        880
+      ],
+      "size": [
+        320,
+        280
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 8
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unividx_R2AIN_irradiance"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "SaveImage",
+      "pos": [
+        2060,
+        1260
+      ],
+      "size": [
+        320,
+        280
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 9
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unividx_R2AIN_normal"
       ]
     }
   ],
@@ -339,7 +415,7 @@
       1,
       1,
       0,
-      3,
+      5,
       0,
       "UNIVIDX_MODEL"
     ],
@@ -347,7 +423,7 @@
       2,
       2,
       0,
-      3,
+      5,
       1,
       "UNIVIDX_TASK"
     ],
@@ -357,37 +433,53 @@
       0,
       4,
       0,
+      "IMAGE"
+    ],
+    [
+      4,
+      4,
+      0,
+      5,
+      2,
+      "IMAGE"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
       "UNIVIDX_RESULT"
     ],
     [
-      4,
-      4,
+      6,
+      6,
       0,
-      5,
+      7,
       0,
       "IMAGE"
     ],
     [
-      5,
-      4,
+      7,
+      6,
       1,
-      6,
-      0,
-      "IMAGE"
-    ],
-    [
-      6,
-      4,
-      2,
-      7,
-      0,
-      "IMAGE"
-    ],
-    [
-      7,
-      4,
-      3,
       8,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      6,
+      2,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      9,
+      6,
+      3,
+      10,
       0,
       "IMAGE"
     ]
@@ -406,9 +498,21 @@
       "flags": {}
     },
     {
-      "title": "Sampling",
+      "title": "RGB Conditioning",
       "bounding": [
         520,
+        60,
+        400,
+        600
+      ],
+      "color": "#3a8c7c",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Sampling",
+      "bounding": [
+        1000,
         60,
         500,
         820
@@ -420,7 +524,7 @@
     {
       "title": "Decode (Intrinsic)",
       "bounding": [
-        1100,
+        1580,
         60,
         360,
         250
@@ -430,9 +534,9 @@
       "flags": {}
     },
     {
-      "title": "Outputs (RGB / Albedo / Irradiance / Normal)",
+      "title": "Outputs",
       "bounding": [
-        1540,
+        2020,
         60,
         400,
         1520
@@ -452,7 +556,7 @@
       ]
     },
     "info": {
-      "name": "UniVidX • t2RAIN (text -> RGB/A/I/N)",
+      "name": "UniVidX • R2AIN (RGB -> A/I/N)",
       "author": "comfyui-unividx"
     }
   },

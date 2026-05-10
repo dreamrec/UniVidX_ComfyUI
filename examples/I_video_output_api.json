@@ -9,26 +9,10 @@
   "2": {
     "class_type": "UniVidXTaskMode",
     "inputs": {
-      "mode": "R2AIN"
+      "mode": "t2RAIN"
     }
   },
   "3": {
-    "class_type": "LoadImage",
-    "inputs": {
-      "image": "unividx_R2AIN_input.png"
-    }
-  },
-  "4": {
-    "class_type": "RepeatImageBatch",
-    "inputs": {
-      "image": [
-        "3",
-        0
-      ],
-      "amount": 21
-    }
-  },
-  "5": {
     "class_type": "UniVidXSampler",
     "inputs": {
       "model": [
@@ -37,10 +21,6 @@
       ],
       "task": [
         "2",
-        0
-      ],
-      "rgb": [
-        "4",
         0
       ],
       "prompt": "a small hedgehog wearing a chef hat in a tiny kitchen",
@@ -55,53 +35,73 @@
       "tiled": true
     }
   },
-  "6": {
+  "4": {
     "class_type": "UniVidXDecodeIntrinsic",
     "inputs": {
       "result": [
-        "5",
+        "3",
         0
       ]
     }
   },
-  "7": {
-    "class_type": "SaveImage",
+  "5": {
+    "class_type": "VHS_VideoCombine",
     "inputs": {
       "images": [
-        "6",
+        "4",
         0
       ],
-      "filename_prefix": "unividx_R2AIN_rgb_placeholder"
+      "frame_rate": 16.0,
+      "loop_count": 0,
+      "filename_prefix": "unividx_t2RAIN_video_rgb",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  },
+  "6": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "4",
+        1
+      ],
+      "frame_rate": 16.0,
+      "loop_count": 0,
+      "filename_prefix": "unividx_t2RAIN_video_albedo",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  },
+  "7": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "4",
+        2
+      ],
+      "frame_rate": 16.0,
+      "loop_count": 0,
+      "filename_prefix": "unividx_t2RAIN_video_irradiance",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
     }
   },
   "8": {
-    "class_type": "SaveImage",
+    "class_type": "VHS_VideoCombine",
     "inputs": {
       "images": [
-        "6",
-        1
-      ],
-      "filename_prefix": "unividx_R2AIN_albedo"
-    }
-  },
-  "9": {
-    "class_type": "SaveImage",
-    "inputs": {
-      "images": [
-        "6",
-        2
-      ],
-      "filename_prefix": "unividx_R2AIN_irradiance"
-    }
-  },
-  "10": {
-    "class_type": "SaveImage",
-    "inputs": {
-      "images": [
-        "6",
+        "4",
         3
       ],
-      "filename_prefix": "unividx_R2AIN_normal"
+      "frame_rate": 16.0,
+      "loop_count": 0,
+      "filename_prefix": "unividx_t2RAIN_video_normal",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
     }
   }
 }

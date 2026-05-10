@@ -2,33 +2,17 @@
   "1": {
     "class_type": "UniVidXLoader",
     "inputs": {
-      "variant": "intrinsic",
+      "variant": "alpha",
       "dtype": "bfloat16"
     }
   },
   "2": {
     "class_type": "UniVidXTaskMode",
     "inputs": {
-      "mode": "R2AIN"
+      "mode": "t2RPFB"
     }
   },
   "3": {
-    "class_type": "LoadImage",
-    "inputs": {
-      "image": "unividx_R2AIN_input.png"
-    }
-  },
-  "4": {
-    "class_type": "RepeatImageBatch",
-    "inputs": {
-      "image": [
-        "3",
-        0
-      ],
-      "amount": 21
-    }
-  },
-  "5": {
     "class_type": "UniVidXSampler",
     "inputs": {
       "model": [
@@ -39,69 +23,65 @@
         "2",
         0
       ],
-      "rgb": [
-        "4",
-        0
-      ],
       "prompt": "a small hedgehog wearing a chef hat in a tiny kitchen",
       "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
       "num_inference_steps": 20,
       "cfg_scale": 5.0,
       "denoising_strength": 1.0,
       "num_frames": 21,
-      "height": 480,
-      "width": 640,
+      "height": 432,
+      "width": 768,
       "seed": 42,
       "tiled": true
     }
   },
-  "6": {
-    "class_type": "UniVidXDecodeIntrinsic",
+  "4": {
+    "class_type": "UniVidXDecodeAlpha",
     "inputs": {
       "result": [
-        "5",
+        "3",
         0
       ]
+    }
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ],
+      "filename_prefix": "unividx_t2RPFB_composite"
+    }
+  },
+  "6": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        1
+      ],
+      "filename_prefix": "unividx_t2RPFB_alpha"
     }
   },
   "7": {
     "class_type": "SaveImage",
     "inputs": {
       "images": [
-        "6",
-        0
+        "4",
+        2
       ],
-      "filename_prefix": "unividx_R2AIN_rgb_placeholder"
+      "filename_prefix": "unividx_t2RPFB_foreground"
     }
   },
   "8": {
     "class_type": "SaveImage",
     "inputs": {
       "images": [
-        "6",
-        1
-      ],
-      "filename_prefix": "unividx_R2AIN_albedo"
-    }
-  },
-  "9": {
-    "class_type": "SaveImage",
-    "inputs": {
-      "images": [
-        "6",
-        2
-      ],
-      "filename_prefix": "unividx_R2AIN_irradiance"
-    }
-  },
-  "10": {
-    "class_type": "SaveImage",
-    "inputs": {
-      "images": [
-        "6",
+        "4",
         3
       ],
-      "filename_prefix": "unividx_R2AIN_normal"
+      "filename_prefix": "unividx_t2RPFB_background"
     }
   }
 }

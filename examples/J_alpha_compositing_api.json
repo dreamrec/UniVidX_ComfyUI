@@ -2,14 +2,14 @@
   "1": {
     "class_type": "UniVidXLoader",
     "inputs": {
-      "variant": "intrinsic",
+      "variant": "alpha",
       "dtype": "bfloat16"
     }
   },
   "2": {
     "class_type": "UniVidXTaskMode",
     "inputs": {
-      "mode": "R2AIN"
+      "mode": "R2PFB"
     }
   },
   "3": {
@@ -49,14 +49,14 @@
       "cfg_scale": 5.0,
       "denoising_strength": 1.0,
       "num_frames": 21,
-      "height": 480,
-      "width": 640,
+      "height": 432,
+      "width": 768,
       "seed": 42,
       "tiled": true
     }
   },
   "6": {
-    "class_type": "UniVidXDecodeIntrinsic",
+    "class_type": "UniVidXDecodeAlpha",
     "inputs": {
       "result": [
         "5",
@@ -65,43 +65,52 @@
     }
   },
   "7": {
-    "class_type": "SaveImage",
+    "class_type": "EmptyImage",
     "inputs": {
-      "images": [
-        "6",
-        0
-      ],
-      "filename_prefix": "unividx_R2AIN_rgb_placeholder"
+      "width": 768,
+      "height": 432,
+      "batch_size": 21,
+      "color": 65535
     }
   },
   "8": {
-    "class_type": "SaveImage",
+    "class_type": "ImageToMask",
     "inputs": {
-      "images": [
+      "image": [
         "6",
         1
       ],
-      "filename_prefix": "unividx_R2AIN_albedo"
+      "channel": "red"
     }
   },
   "9": {
-    "class_type": "SaveImage",
+    "class_type": "ImageCompositeMasked",
     "inputs": {
-      "images": [
+      "destination": [
+        "7",
+        0
+      ],
+      "source": [
         "6",
         2
       ],
-      "filename_prefix": "unividx_R2AIN_irradiance"
+      "mask": [
+        "8",
+        0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false
     }
   },
   "10": {
     "class_type": "SaveImage",
     "inputs": {
       "images": [
-        "6",
-        3
+        "9",
+        0
       ],
-      "filename_prefix": "unividx_R2AIN_normal"
+      "filename_prefix": "unividx_J_composite_over_cyan"
     }
   }
 }

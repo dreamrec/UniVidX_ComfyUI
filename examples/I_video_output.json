@@ -1,5 +1,5 @@
 {
-  "id": "unividx_x_t2rain_(text_->_rgb/a/i/n)",
+  "id": "unividx_x_t2rain_->_4_mp4_videos",
   "revision": 0,
   "last_node_id": 8,
   "last_link_id": 7,
@@ -219,14 +219,14 @@
     },
     {
       "id": 5,
-      "type": "SaveImage",
+      "type": "VHS_VideoCombine",
       "pos": [
         1580,
         120
       ],
       "size": [
-        320,
-        280
+        380,
+        480
       ],
       "flags": {},
       "order": 4,
@@ -236,26 +236,51 @@
           "name": "images",
           "type": "IMAGE",
           "link": 4
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
       "properties": {
-        "Node name for S&R": "SaveImage"
+        "Node name for S&R": "VHS_VideoCombine"
       },
       "widgets_values": [
-        "unividx_t2RAIN_rgb"
+        16.0,
+        0,
+        "unividx_t2RAIN_video_rgb",
+        "video/h264-mp4",
+        false,
+        true
       ]
     },
     {
       "id": 6,
-      "type": "SaveImage",
+      "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        500
+        700
       ],
       "size": [
-        320,
-        280
+        380,
+        480
       ],
       "flags": {},
       "order": 5,
@@ -265,26 +290,51 @@
           "name": "images",
           "type": "IMAGE",
           "link": 5
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
       "properties": {
-        "Node name for S&R": "SaveImage"
+        "Node name for S&R": "VHS_VideoCombine"
       },
       "widgets_values": [
-        "unividx_t2RAIN_albedo"
+        16.0,
+        0,
+        "unividx_t2RAIN_video_albedo",
+        "video/h264-mp4",
+        false,
+        true
       ]
     },
     {
       "id": 7,
-      "type": "SaveImage",
+      "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        880
+        1280
       ],
       "size": [
-        320,
-        280
+        380,
+        480
       ],
       "flags": {},
       "order": 6,
@@ -294,26 +344,51 @@
           "name": "images",
           "type": "IMAGE",
           "link": 6
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
       "properties": {
-        "Node name for S&R": "SaveImage"
+        "Node name for S&R": "VHS_VideoCombine"
       },
       "widgets_values": [
-        "unividx_t2RAIN_irradiance"
+        16.0,
+        0,
+        "unividx_t2RAIN_video_irradiance",
+        "video/h264-mp4",
+        false,
+        true
       ]
     },
     {
       "id": 8,
-      "type": "SaveImage",
+      "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        1260
+        1860
       ],
       "size": [
-        320,
-        280
+        380,
+        480
       ],
       "flags": {},
       "order": 7,
@@ -323,14 +398,39 @@
           "name": "images",
           "type": "IMAGE",
           "link": 7
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "shape": 7
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "shape": 7
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "shape": 7
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
       "properties": {
-        "Node name for S&R": "SaveImage"
+        "Node name for S&R": "VHS_VideoCombine"
       },
       "widgets_values": [
-        "unividx_t2RAIN_normal"
+        16.0,
+        0,
+        "unividx_t2RAIN_video_normal",
+        "video/h264-mp4",
+        false,
+        true
       ]
     }
   ],
@@ -430,12 +530,12 @@
       "flags": {}
     },
     {
-      "title": "Outputs (RGB / Albedo / Irradiance / Normal)",
+      "title": "Video Outputs (4 MP4s)",
       "bounding": [
         1540,
         60,
-        400,
-        1520
+        460,
+        2320
       ],
       "color": "#c97a3a",
       "font_size": 24,
@@ -452,7 +552,7 @@
       ]
     },
     "info": {
-      "name": "UniVidX • t2RAIN (text -> RGB/A/I/N)",
+      "name": "UniVidX • t2RAIN -> 4 MP4 videos",
       "author": "comfyui-unividx"
     }
   },

@@ -1,8 +1,8 @@
 {
-  "id": "unividx_x_t2rain_(text_->_rgb/a/i/n)",
+  "id": "unividx_x_r2pfb_matte_->_composite_over_cyan_background",
   "revision": 0,
-  "last_node_id": 8,
-  "last_link_id": 7,
+  "last_node_id": 10,
+  "last_link_id": 10,
   "nodes": [
     {
       "id": 1,
@@ -33,7 +33,7 @@
         "Node name for S&R": "UniVidXLoader"
       },
       "widgets_values": [
-        "intrinsic",
+        "alpha",
         "bfloat16"
       ]
     },
@@ -66,14 +66,89 @@
         "Node name for S&R": "UniVidXTaskMode"
       },
       "widgets_values": [
-        "t2RAIN"
+        "R2PFB"
       ]
     },
     {
       "id": 3,
-      "type": "UniVidXSampler",
+      "type": "LoadImage",
       "pos": [
         560,
+        120
+      ],
+      "size": [
+        320,
+        320
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            3
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "unividx_R2AIN_input.png",
+        "image"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "RepeatImageBatch",
+      "pos": [
+        560,
+        540
+      ],
+      "size": [
+        320,
+        80
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            4
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "RepeatImageBatch"
+      },
+      "widgets_values": [
+        21
+      ]
+    },
+    {
+      "id": 5,
+      "type": "UniVidXSampler",
+      "pos": [
+        1040,
         120
       ],
       "size": [
@@ -81,7 +156,7 @@
         720
       ],
       "flags": {},
-      "order": 2,
+      "order": 4,
       "mode": 0,
       "inputs": [
         {
@@ -97,7 +172,8 @@
         {
           "name": "rgb",
           "type": "IMAGE",
-          "shape": 7
+          "shape": 7,
+          "link": 4
         },
         {
           "name": "albedo",
@@ -135,7 +211,7 @@
           "name": "result",
           "type": "UNIVIDX_RESULT",
           "links": [
-            3
+            5
           ],
           "slot_index": 0
         }
@@ -150,18 +226,18 @@
         5.0,
         1.0,
         21,
-        480,
-        640,
+        432,
+        768,
         42,
         "fixed",
         true
       ]
     },
     {
-      "id": 4,
-      "type": "UniVidXDecodeIntrinsic",
+      "id": 6,
+      "type": "UniVidXDecodeAlpha",
       "pos": [
-        1140,
+        1620,
         120
       ],
       "size": [
@@ -169,59 +245,175 @@
         150
       ],
       "flags": {},
-      "order": 3,
+      "order": 5,
       "mode": 0,
       "inputs": [
         {
           "name": "result",
           "type": "UNIVIDX_RESULT",
-          "link": 3
+          "link": 5
         }
       ],
       "outputs": [
         {
-          "name": "rgb",
-          "type": "IMAGE",
-          "links": [
-            4
-          ],
-          "slot_index": 0
+          "name": "composite_rgb",
+          "type": "IMAGE"
         },
         {
-          "name": "albedo",
-          "type": "IMAGE",
-          "links": [
-            5
-          ],
-          "slot_index": 1
-        },
-        {
-          "name": "irradiance",
+          "name": "alpha",
           "type": "IMAGE",
           "links": [
             6
           ],
+          "slot_index": 1
+        },
+        {
+          "name": "foreground",
+          "type": "IMAGE",
+          "links": [
+            8
+          ],
           "slot_index": 2
         },
         {
-          "name": "normal",
-          "type": "IMAGE",
-          "links": [
-            7
-          ],
-          "slot_index": 3
+          "name": "background",
+          "type": "IMAGE"
         }
       ],
       "properties": {
-        "Node name for S&R": "UniVidXDecodeIntrinsic"
+        "Node name for S&R": "UniVidXDecodeAlpha"
       },
       "widgets_values": []
     },
     {
-      "id": 5,
+      "id": 7,
+      "type": "EmptyImage",
+      "pos": [
+        2060,
+        120
+      ],
+      "size": [
+        280,
+        130
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            7
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "EmptyImage"
+      },
+      "widgets_values": [
+        768,
+        432,
+        21,
+        65535
+      ]
+    },
+    {
+      "id": 8,
+      "type": "ImageToMask",
+      "pos": [
+        2520,
+        120
+      ],
+      "size": [
+        280,
+        80
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            9
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageToMask"
+      },
+      "widgets_values": [
+        "red"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "ImageCompositeMasked",
+      "pos": [
+        2500,
+        300
+      ],
+      "size": [
+        320,
+        200
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "destination",
+          "type": "IMAGE",
+          "link": 7
+        },
+        {
+          "name": "source",
+          "type": "IMAGE",
+          "link": 8
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "shape": 7,
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            10
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageCompositeMasked"
+      },
+      "widgets_values": [
+        0,
+        0,
+        false
+      ]
+    },
+    {
+      "id": 10,
       "type": "SaveImage",
       "pos": [
-        1580,
+        2980,
         120
       ],
       "size": [
@@ -229,13 +421,13 @@
         280
       ],
       "flags": {},
-      "order": 4,
+      "order": 9,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 4
+          "link": 10
         }
       ],
       "outputs": [],
@@ -243,94 +435,7 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_rgb"
-      ]
-    },
-    {
-      "id": 6,
-      "type": "SaveImage",
-      "pos": [
-        1580,
-        500
-      ],
-      "size": [
-        320,
-        280
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 5
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "SaveImage"
-      },
-      "widgets_values": [
-        "unividx_t2RAIN_albedo"
-      ]
-    },
-    {
-      "id": 7,
-      "type": "SaveImage",
-      "pos": [
-        1580,
-        880
-      ],
-      "size": [
-        320,
-        280
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 6
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "SaveImage"
-      },
-      "widgets_values": [
-        "unividx_t2RAIN_irradiance"
-      ]
-    },
-    {
-      "id": 8,
-      "type": "SaveImage",
-      "pos": [
-        1580,
-        1260
-      ],
-      "size": [
-        320,
-        280
-      ],
-      "flags": {},
-      "order": 7,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 7
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "SaveImage"
-      },
-      "widgets_values": [
-        "unividx_t2RAIN_normal"
+        "unividx_J_composite_over_cyan"
       ]
     }
   ],
@@ -339,7 +444,7 @@
       1,
       1,
       0,
-      3,
+      5,
       0,
       "UNIVIDX_MODEL"
     ],
@@ -347,7 +452,7 @@
       2,
       2,
       0,
-      3,
+      5,
       1,
       "UNIVIDX_TASK"
     ],
@@ -357,37 +462,61 @@
       0,
       4,
       0,
+      "IMAGE"
+    ],
+    [
+      4,
+      4,
+      0,
+      5,
+      2,
+      "IMAGE"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
       "UNIVIDX_RESULT"
     ],
     [
-      4,
-      4,
-      0,
-      5,
-      0,
-      "IMAGE"
-    ],
-    [
-      5,
-      4,
+      6,
+      6,
       1,
-      6,
-      0,
-      "IMAGE"
-    ],
-    [
-      6,
-      4,
-      2,
-      7,
-      0,
-      "IMAGE"
-    ],
-    [
-      7,
-      4,
-      3,
       8,
+      0,
+      "IMAGE"
+    ],
+    [
+      7,
+      7,
+      0,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      6,
+      2,
+      9,
+      1,
+      "IMAGE"
+    ],
+    [
+      9,
+      8,
+      0,
+      9,
+      2,
+      "MASK"
+    ],
+    [
+      10,
+      9,
+      0,
+      10,
       0,
       "IMAGE"
     ]
@@ -406,9 +535,21 @@
       "flags": {}
     },
     {
-      "title": "Sampling",
+      "title": "RGB Conditioning",
       "bounding": [
         520,
+        60,
+        400,
+        600
+      ],
+      "color": "#3a8c7c",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Sampling",
+      "bounding": [
+        1000,
         60,
         500,
         820
@@ -418,9 +559,9 @@
       "flags": {}
     },
     {
-      "title": "Decode (Intrinsic)",
+      "title": "Decode (Alpha)",
       "bounding": [
-        1100,
+        1580,
         60,
         360,
         250
@@ -430,12 +571,36 @@
       "flags": {}
     },
     {
-      "title": "Outputs (RGB / Albedo / Irradiance / Normal)",
+      "title": "Background",
       "bounding": [
-        1540,
+        2020,
+        60,
+        360,
+        230
+      ],
+      "color": "#7a4ac1",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Composite",
+      "bounding": [
+        2460,
         60,
         400,
-        1520
+        480
+      ],
+      "color": "#7a4ac1",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Output",
+      "bounding": [
+        2940,
+        60,
+        400,
+        380
       ],
       "color": "#c97a3a",
       "font_size": 24,
@@ -452,7 +617,7 @@
       ]
     },
     "info": {
-      "name": "UniVidX • t2RAIN (text -> RGB/A/I/N)",
+      "name": "UniVidX • R2PFB matte -> Composite over cyan background",
       "author": "comfyui-unividx"
     }
   },

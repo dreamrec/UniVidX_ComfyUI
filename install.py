@@ -28,9 +28,12 @@ PINNED_UNIVIDX_COMMIT = "382b9002757f4d5f04a90ec23b784dce11d56221"
 # Demo workflow JSONs that get copied into the user's workflow directory so
 # they appear in the ComfyUI sidebar without manual import.
 DEMO_WORKFLOW_NAMES = (
-    "t2RAIN_basic.json",
-    "t2RAIN_basic_api.json",
-    "R2AIN_basic_api.json",
+    "t2RAIN_basic.json",          # text -> RGB+A+I+N (intrinsic)
+    "R2AIN_basic.json",           # RGB-conditioned intrinsic
+    "t2RPFB_basic.json",          # text -> R+P+F+B (alpha)
+    "R2PFB_basic.json",           # RGB-conditioned alpha (sharp matte)
+    "I_video_output.json",        # t2RAIN -> 4x MP4 via VHS_VideoCombine
+    "J_alpha_compositing.json",   # R2PFB matte -> ImageCompositeMasked
 )
 
 

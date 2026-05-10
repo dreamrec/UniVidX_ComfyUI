@@ -2,14 +2,14 @@
   "1": {
     "class_type": "UniVidXLoader",
     "inputs": {
-      "variant": "intrinsic",
+      "variant": "alpha",
       "dtype": "bfloat16"
     }
   },
   "2": {
     "class_type": "UniVidXTaskMode",
     "inputs": {
-      "mode": "R2AIN"
+      "mode": "R2PFB"
     }
   },
   "3": {
@@ -49,14 +49,14 @@
       "cfg_scale": 5.0,
       "denoising_strength": 1.0,
       "num_frames": 21,
-      "height": 480,
-      "width": 640,
+      "height": 432,
+      "width": 768,
       "seed": 42,
       "tiled": true
     }
   },
   "6": {
-    "class_type": "UniVidXDecodeIntrinsic",
+    "class_type": "UniVidXDecodeAlpha",
     "inputs": {
       "result": [
         "5",
@@ -71,7 +71,7 @@
         "6",
         0
       ],
-      "filename_prefix": "unividx_R2AIN_rgb_placeholder"
+      "filename_prefix": "unividx_R2PFB_composite_placeholder"
     }
   },
   "8": {
@@ -81,7 +81,7 @@
         "6",
         1
       ],
-      "filename_prefix": "unividx_R2AIN_albedo"
+      "filename_prefix": "unividx_R2PFB_alpha_matte"
     }
   },
   "9": {
@@ -91,7 +91,7 @@
         "6",
         2
       ],
-      "filename_prefix": "unividx_R2AIN_irradiance"
+      "filename_prefix": "unividx_R2PFB_foreground"
     }
   },
   "10": {
@@ -101,7 +101,7 @@
         "6",
         3
       ],
-      "filename_prefix": "unividx_R2AIN_normal"
+      "filename_prefix": "unividx_R2PFB_background"
     }
   }
 }

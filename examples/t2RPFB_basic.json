@@ -1,5 +1,5 @@
 {
-  "id": "unividx_x_t2rain_(text_->_rgb/a/i/n)",
+  "id": "unividx_x_t2rpfb_(text_->_r/p/f/b)",
   "revision": 0,
   "last_node_id": 8,
   "last_link_id": 7,
@@ -33,7 +33,7 @@
         "Node name for S&R": "UniVidXLoader"
       },
       "widgets_values": [
-        "intrinsic",
+        "alpha",
         "bfloat16"
       ]
     },
@@ -66,7 +66,7 @@
         "Node name for S&R": "UniVidXTaskMode"
       },
       "widgets_values": [
-        "t2RAIN"
+        "t2RPFB"
       ]
     },
     {
@@ -150,8 +150,8 @@
         5.0,
         1.0,
         21,
-        480,
-        640,
+        432,
+        768,
         42,
         "fixed",
         true
@@ -159,7 +159,7 @@
     },
     {
       "id": 4,
-      "type": "UniVidXDecodeIntrinsic",
+      "type": "UniVidXDecodeAlpha",
       "pos": [
         1140,
         120
@@ -180,7 +180,7 @@
       ],
       "outputs": [
         {
-          "name": "rgb",
+          "name": "composite_rgb",
           "type": "IMAGE",
           "links": [
             4
@@ -188,7 +188,7 @@
           "slot_index": 0
         },
         {
-          "name": "albedo",
+          "name": "alpha",
           "type": "IMAGE",
           "links": [
             5
@@ -196,7 +196,7 @@
           "slot_index": 1
         },
         {
-          "name": "irradiance",
+          "name": "foreground",
           "type": "IMAGE",
           "links": [
             6
@@ -204,7 +204,7 @@
           "slot_index": 2
         },
         {
-          "name": "normal",
+          "name": "background",
           "type": "IMAGE",
           "links": [
             7
@@ -213,7 +213,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "UniVidXDecodeIntrinsic"
+        "Node name for S&R": "UniVidXDecodeAlpha"
       },
       "widgets_values": []
     },
@@ -243,7 +243,7 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_rgb"
+        "unividx_t2RPFB_composite"
       ]
     },
     {
@@ -272,7 +272,7 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_albedo"
+        "unividx_t2RPFB_alpha"
       ]
     },
     {
@@ -301,7 +301,7 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_irradiance"
+        "unividx_t2RPFB_foreground"
       ]
     },
     {
@@ -330,7 +330,7 @@
         "Node name for S&R": "SaveImage"
       },
       "widgets_values": [
-        "unividx_t2RAIN_normal"
+        "unividx_t2RPFB_background"
       ]
     }
   ],
@@ -418,7 +418,7 @@
       "flags": {}
     },
     {
-      "title": "Decode (Intrinsic)",
+      "title": "Decode (Alpha)",
       "bounding": [
         1100,
         60,
@@ -430,7 +430,7 @@
       "flags": {}
     },
     {
-      "title": "Outputs (RGB / Albedo / Irradiance / Normal)",
+      "title": "Outputs (Composite / Pha / Fgr / Bgr)",
       "bounding": [
         1540,
         60,
@@ -452,7 +452,7 @@
       ]
     },
     "info": {
-      "name": "UniVidX • t2RAIN (text -> RGB/A/I/N)",
+      "name": "UniVidX • t2RPFB (text -> R/P/F/B)",
       "author": "comfyui-unividx"
     }
   },
