@@ -557,7 +557,7 @@
     },
     "info": {
       "name": "UniVidX • R2PFB (RGB -> Pha/Fgr/Bgr)",
-      "author": "comfyui-unividx"
+      "author": "dreamrec/UniVidX_ComfyUI"
     }
   },
   "version": 0.4

@@ -618,7 +618,7 @@
     },
     "info": {
       "name": "UniVidX • R2PFB matte -> Composite over cyan background",
-      "author": "comfyui-unividx"
+      "author": "dreamrec/UniVidX_ComfyUI"
     }
   },
   "version": 0.4

@@ -647,7 +647,7 @@ def finalize(nodes: list[Node], groups: list[Group],
         "config": {},
         "extra": {
             "ds": {"scale": 0.7, "offset": [0, 0]},
-            "info": {"name": name, "author": "comfyui-unividx"},
+            "info": {"name": name, "author": "dreamrec/UniVidX_ComfyUI"},
         },
         "version": 0.4,
     }

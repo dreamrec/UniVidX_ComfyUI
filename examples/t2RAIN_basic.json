@@ -453,7 +453,7 @@
     },
     "info": {
       "name": "UniVidX • t2RAIN (text -> RGB/A/I/N)",
-      "author": "comfyui-unividx"
+      "author": "dreamrec/UniVidX_ComfyUI"
     }
   },
   "version": 0.4
