@@ -1,0 +1,468 @@
+{
+  "id": "unividx-t2rain-smoke",
+  "revision": 0,
+  "last_node_id": 8,
+  "last_link_id": 6,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "UniVidXLoader",
+      "pos": [
+        70,
+        80
+      ],
+      "size": [
+        300,
+        130
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "UNIVIDX_MODEL",
+          "links": [
+            1
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UniVidXLoader"
+      },
+      "widgets_values": [
+        "intrinsic",
+        "bfloat16"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "UniVidXTaskMode",
+      "pos": [
+        70,
+        260
+      ],
+      "size": [
+        300,
+        80
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "task",
+          "type": "UNIVIDX_TASK",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UniVidXTaskMode"
+      },
+      "widgets_values": [
+        "t2RAIN"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "UniVidXSampler",
+      "pos": [
+        470,
+        80
+      ],
+      "size": [
+        400,
+        800
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "UNIVIDX_MODEL",
+          "link": 1
+        },
+        {
+          "name": "task",
+          "type": "UNIVIDX_TASK",
+          "link": 2
+        },
+        {
+          "name": "rgb",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "albedo",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "irradiance",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "normal",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "pha",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "fgr",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "bgr",
+          "type": "IMAGE",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "UNIVIDX_RESULT",
+          "links": [
+            3
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UniVidXSampler"
+      },
+      "widgets_values": [
+        "a small hedgehog wearing a chef hat in a tiny kitchen",
+        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        20,
+        5.0,
+        1.0,
+        21,
+        480,
+        640,
+        42,
+        "fixed",
+        true
+      ]
+    },
+    {
+      "id": 4,
+      "type": "UniVidXDecodeIntrinsic",
+      "pos": [
+        970,
+        80
+      ],
+      "size": [
+        260,
+        130
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "result",
+          "type": "UNIVIDX_RESULT",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "rgb",
+          "type": "IMAGE",
+          "links": [
+            4
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "albedo",
+          "type": "IMAGE",
+          "links": [
+            5
+          ],
+          "slot_index": 1
+        },
+        {
+          "name": "irradiance",
+          "type": "IMAGE",
+          "links": [
+            6
+          ],
+          "slot_index": 2
+        },
+        {
+          "name": "normal",
+          "type": "IMAGE",
+          "links": [
+            7
+          ],
+          "slot_index": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UniVidXDecodeIntrinsic"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 5,
+      "type": "SaveImage",
+      "pos": [
+        1330,
+        80
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 4
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unividx_t2RAIN_rgb"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "SaveImage",
+      "pos": [
+        1330,
+        240
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unividx_t2RAIN_albedo"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "SaveImage",
+      "pos": [
+        1330,
+        400
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 6
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unividx_t2RAIN_irradiance"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "SaveImage",
+      "pos": [
+        1330,
+        560
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "unividx_t2RAIN_normal"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      3,
+      0,
+      "UNIVIDX_MODEL"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      1,
+      "UNIVIDX_TASK"
+    ],
+    [
+      3,
+      3,
+      0,
+      4,
+      0,
+      "UNIVIDX_RESULT"
+    ],
+    [
+      4,
+      4,
+      0,
+      5,
+      0,
+      "IMAGE"
+    ],
+    [
+      5,
+      4,
+      1,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      6,
+      4,
+      2,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      7,
+      4,
+      3,
+      8,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "title": "Model Setup",
+      "bounding": [
+        40,
+        20,
+        360,
+        910
+      ],
+      "color": "#3a7c5a",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Sampling",
+      "bounding": [
+        440,
+        20,
+        460,
+        910
+      ],
+      "color": "#4a5fc1",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Decoding",
+      "bounding": [
+        940,
+        20,
+        320,
+        910
+      ],
+      "color": "#c14a8e",
+      "font_size": 24,
+      "flags": {}
+    },
+    {
+      "title": "Outputs",
+      "bounding": [
+        1300,
+        20,
+        380,
+        910
+      ],
+      "color": "#c97a3a",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.7,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    "info": {
+      "name": "UniVidX • t2RAIN smoke test",
+      "author": "comfyui-unividx",
+      "description": "Strategy A smoke test for UniVidX intrinsic decomposition. Generates RGB / Albedo / Irradiance / Normal videos from a text prompt at 480x640x21f. Uses 20 inference steps for fast validation; bump to 50 for final quality."
+    }
+  },
+  "version": 0.4
+}
