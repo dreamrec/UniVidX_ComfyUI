@@ -62,32 +62,40 @@ def unividx_cwd():
 
 
 def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch.bfloat16,
-               vram_buffer: float = 4.0, quantize_fp8: str | None = None):
+               vram_buffer: float = 4.0, quantize_fp8: str | None = None,
+               compile_dit: bool = False):
     """
     Load (or return from cache) UniVidIntrinsic or UniVidAlpha.
 
     variant: 'intrinsic' or 'alpha'.
-    vram_buffer: GB of GPU VRAM to keep free for activations. Lower = more
-        model resident, faster per-step. 4.0 streams most of the 28 GB DiT
-        from CPU on demand (suitable for 24 GB GPUs); 12.0 keeps most of
-        the DiT resident on a 32 GB GPU and roughly halves per-step time;
-        on 48-96 GB cards (RTX 6000 Pro Blackwell, RTX 5000 Ada) any
-        small buffer gives full residency. Cached separately per buffer
-        value so changing it re-applies the right offload policy.
+    vram_buffer: DEPRECATED on current DiffSynth (the
+        WanVideoPipeline.enable_vram_management entrypoint was removed).
+        Cached separately per value purely so old workflows that wired
+        this in still get a unique cache slot; the value otherwise has
+        no effect on speed.
     quantize_fp8: None (default), or one of optimum-quanto's qtype names —
         "qfloat8" (e4m3, larger mantissa) or "qfloat8_e5m2" (larger
         exponent). Post-quantizes the DiT via mmgp.offload.quantize.
         Halves DiT memory (~28 GB BF16 → ~14 GB FP8), enabling full
-        residency on 32 GB GPUs without streaming, plus Blackwell native
-        FP8 matmul. Experimental: LoRA layers are excluded from
-        quantization to keep adapter precision intact.
+        residency on 32 GB GPUs and Blackwell-native FP8 matmul.
+        EXPERIMENTAL: the quantize() pass over the LoRA-attached DiT can
+        take 10+ min and has hung on Wan2.1-14B + UniVidX's adapter
+        stack in our testing. LoRA layers are excluded from quantization
+        to preserve adapter precision.
+    compile_dit: torch.compile(dit, mode='reduce-overhead', dynamic=True)
+        after model assembly. First sampler step pays a 60-120 sec graph
+        capture cost; subsequent steps are typically 20-30% faster on
+        Blackwell/Ada. The compile cache is keyed by tensor shapes — if
+        you change resolution or frame count between runs, the next run
+        re-captures.
     """
     if variant not in ("intrinsic", "alpha"):
         raise ValueError(f"variant must be 'intrinsic' or 'alpha', got {variant!r}")
 
     paths = resolve_paths(_comfy_root())
     ckpt = paths[f"univid_{variant}_ckpt"]
-    cache_key = (variant, ckpt, device, dtype, float(vram_buffer), quantize_fp8)
+    cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
+                 quantize_fp8, bool(compile_dit))
 
     with _LOAD_LOCK:
         if cache_key in _MODEL_CACHE:
@@ -148,12 +156,15 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             if quantize_fp8:
                 _quantize_dit_fp8(model, qtype=quantize_fp8)
 
-            # Tunable per-loader: passed through from the UniVidXLoader's
-            # vram_buffer_gb widget. 4.0 (default) is the safe choice on
-            # 24 GB GPUs; on 32 GB+ raise to ~12.0 to keep more of the DiT
-            # resident and roughly double per-step throughput.
+            # Backwards-compat with old saved workflows — the underlying
+            # diffsynth API was removed, so this is a no-op on the
+            # current build. Kept so the hasattr-guard fires cleanly if
+            # a future diffsynth version reintroduces it.
             if hasattr(model, "pipe") and hasattr(model.pipe, "enable_vram_management"):
                 model.pipe.enable_vram_management(vram_buffer=float(vram_buffer))
+
+            if compile_dit:
+                _compile_dit(model)
 
         _MODEL_CACHE[cache_key] = model
         return model
@@ -183,6 +194,21 @@ def _patch_unividx_load_file_to_readonly() -> None:
         if getattr(existing, "_unividx_readonly_patch", False):
             continue
         mod.load_file = _readonly_load_file
+
+
+def _compile_dit(model) -> None:
+    """torch.compile the assembled DiT for ~20-30% per-step speedup on
+    Blackwell/Ada. Mode 'reduce-overhead' uses CUDA Graphs where safe;
+    dynamic=True keeps a single compile valid across resolution changes
+    (with a small per-shape recompile cost on first hit).
+    """
+    dit = getattr(getattr(model, "pipe", None), "dit", None)
+    if dit is None:
+        raise RuntimeError(
+            "Cannot find model.pipe.dit to compile — UniVidX pipeline "
+            "structure may have changed."
+        )
+    model.pipe.dit = torch.compile(dit, mode="reduce-overhead", dynamic=True, fullgraph=False)
 
 
 def _quantize_dit_fp8(model, qtype: str = "qfloat8") -> None:

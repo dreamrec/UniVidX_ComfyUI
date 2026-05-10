@@ -167,24 +167,62 @@ For modes where a modality is a *condition* rather than a target, the correspond
 
 ## Performance & VRAM
 
-Wan2.1-T2V-14B is **~28 GB FP16**. On a 32 GB GPU it would otherwise pin VRAM at the ceiling and leave no headroom for activations / KV cache / VAE decode, making each inference step memory-bound (GPU at 99% util but only ~50°C — classic memory-bound signature) at 2-3+ minutes per step.
+Wan2.1-T2V-14B is **~28 GB BF16**. UniVidX adds rank-32 LoRA adapters (~800 MB per variant) and runs **Cross-Modal Self-Attention over 4 modalities in parallel** — that quadratic-in-modality-count attention is the dominant per-step cost, not memory bandwidth.
 
-`runtime.load_model()` calls `pipe.enable_vram_management(vram_buffer=4.0)` after model construction. This wraps the DiT's `Linear` / `Conv3d` / `LayerNorm` / `RMSNorm` modules with auto-offload wrappers — modules live on CPU and stream to GPU only during their forward pass. With 16+ GB host RAM this leaves comfortable working memory on GPU.
+**Measured baseline** (RTX 5090, 32 GB, torch 2.7.0+cu128, intrinsic variant, R2AIN mode, video-conditioned):
 
-**Validated benchmarks** (RTX 5090, 32 GB, torch 2.7.0+cu128, intrinsic variant, t2RAIN mode):
-
-| Resolution × frames × steps | Per-step time | Total wall time |
+| Resolution × frames × steps | Per-step time | Total wall time¹ |
 |---|---|---|
-| 256×256 × 5 frames × 3 steps | ~3.8 sec/step | 130 sec (incl. cold load) |
-| 480×640 × 21 frames × 20 steps | ~30.2 sec/step | 628 sec (incl. cold load) |
+| 256×256 × 5 frames × 3 steps | ~3.8 sec/step | 130 sec |
+| 480×640 × 21 frames × 20 steps | **~43 sec/step** | **17.6 min** |
 
-Cache hits on subsequent same-variant runs skip the ~3 min cold load. Switching variants (intrinsic ↔ alpha) forces a reload.
+¹ Includes ~3 min cold-load per (variant, dtype) cache miss; subsequent runs in the same session skip it.
 
-### Tuning for your hardware
+### Optimization knobs on the Loader
 
-- **Less VRAM**: lower the `vram_buffer` floor in `src/runtime.py` to e.g. `vram_buffer=8.0`. More aggressive offload, slower per step but leaves more headroom for higher-res runs.
-- **More headroom desired**: pass a smaller buffer.
-- **Pin a specific param count resident**: pass `num_persistent_param_in_dit=N` instead of `vram_buffer`.
+The `UniVidXLoader` node exposes three perf knobs:
+
+| Widget | Effect | When to use |
+|---|---|---|
+| `dtype` = `bfloat16` | Reference / default | Always works, matches UniVidX training |
+| `dtype` = `fp8_e4m3fn` / `fp8_e5m2` | Post-quantizes the DiT via optimum-quanto. Halves DiT to ~14 GB; on Hopper/Blackwell engages Marlin FP8 matmul kernels. **EXPERIMENTAL** — the quantize() pass over Wan2.1-14B + UniVidX's LoRA stack can hang on cold-load in our testing. Try it; if it stalls, fall back to bfloat16. | If/when quanto plays nicely with the stack |
+| `compile_dit` = `True` | `torch.compile(dit, mode='reduce-overhead', dynamic=True)` after model load. First sampler step pays a ~60-120 sec graph capture; subsequent steps are typically 20-30% faster. | Long runs at fixed resolution. Recompile cost on resolution change. |
+| `vram_buffer_gb` | **DEPRECATED on current DiffSynth** — the underlying `WanVideoPipeline.enable_vram_management` API was removed upstream, so this widget is a no-op. Left for backwards-compat with saved workflows. | n/a |
+
+### The single biggest drop-in win: install Flash Attention 3
+
+The Wan DiT's attention kernel selection chain is **FA3 > FA2 > SAGE > SDPA**, picked at first import based on what's installed. We currently auto-pick **FA2 (v2.8.2)** — installing **Flash Attention 3** for Hopper/Blackwell would be auto-picked instead, and is typically **1.5-2× faster on attention** (the dominant cost). Zero code changes, no quality loss.
+
+```bash
+# In your ComfyUI venv. Build varies by CUDA version + GPU arch — check
+# https://github.com/Dao-AILab/flash-attention/releases for a Hopper/Blackwell wheel.
+pip install flash-attn-3  # or build from source: see flash-attention readme
+```
+
+Verify it picked up by importing in your venv:
+
+```bash
+python -c "import flash_attn_interface; print('FA3 OK')"
+```
+
+### Other levers (medium-impact, may cost quality)
+
+- **`cfg_scale = 1.0`** in the sampler — disables classifier-free guidance, giving **2× per-step speedup** (single forward pass instead of two). Quality drops noticeably for text-only modes; for RGB-conditioned modes (`R2AIN`, `R2PFB`) the RGB carries most of the signal so the loss is small.
+- **Lower `num_inference_steps`** — UniVidX uses `FlowMatchScheduler(shift=5, sigma_min=0.0, extra_one_step=True)`, which doesn't have a "more efficient" drop-in alternative (can't swap to DPM++). Step count just scales linearly; 15 vs 20 saves 25%, 10 saves 50%, with linear quality drop.
+- **Install SageAttention** (`pip install sageattention`) — INT8-quantized attention. Only auto-picked when FA2 and FA3 are *absent*, so you'd need to remove flash-attn first. Not generally recommended over FA3.
+
+### Honest stack: what actually moves the needle
+
+| Change | Validated speedup vs 17.6 min baseline | Risk |
+|---|---|---|
+| `vram_buffer_gb` from 4 to 12 | **measured: 16.6 min (~6%)** — within noise | n/a (no-op) |
+| `compile_dit = True` (BF16, no FP8) | expected 12-14 min (20-30%) | first-step compile cost; LoRA-swap re-compiles |
+| Install Flash Attention 3 | expected 11-12 min (30-40%) | none |
+| FP8 quantization (when stable) | expected 10-13 min (30-40%) on top of FA3 | quanto hangs on some configs; LoRA excluded from quant |
+| Stacked: FA3 + compile + FP8 (when stable) | **target: 4-6 min** (~3× total) | composite of above |
+| `cfg_scale=1.0` (RGB-conditioned only) | further 2× on top of stack → ~3 min | mild quality cost |
+
+The README previously claimed ~30 sec/step with VRAM management; that number was true under an older diffsynth version that exposed `enable_vram_management(vram_buffer=...)` on `WanVideoPipeline`. The current diffsynth removed that API — our runtime call is `hasattr`-guarded and silently no-ops, which is why the per-step is now ~43 sec rather than ~30 sec. The right fix is FA3 + compile, not the (now-cosmetic) vram_buffer knob.
 
 ### Resolution & frame-count notes
 
