@@ -10,7 +10,19 @@
 
 ComfyUI custom nodes for [UniVidX](https://houyuanchen111.github.io/UniVidX.github.io/) (SIGGRAPH 2026): unified video diffusion that decomposes a clip into **RGB / Albedo / Irradiance / Normal** (intrinsic) or **Composite RGB / Alpha matte / Foreground / Background** (alpha). 30 task modes across two model variants, all driven from a single five-node graph.
 
+**What you'd use it for:** relighting (swap the irradiance channel, recombine), VFX alpha pulls without a green screen (a clean matte from any clip), 3D reconstruction pipelines that need normals + albedo as conditioning, ControlNet-style guidance for *other* video models that consume normal maps.
+
 **Strategy A wrapper** — UniVidX's official pipeline runs as an opaque black box. The four output IMAGE batches become standard ComfyUI tensors that flow into any downstream node (VHS video combine, alpha compositing, 3D reconstruction, ControlNet for *other* models, etc.).
+
+### Use this when
+
+- You specifically need **intrinsic** (RGB / Albedo / Irradiance / Normal) or **alpha** (matte / fg / bg) decomposition of a video clip — that's UniVidX's whole reason to exist. No other Wan2.1 wrapper does this.
+- You want clean drag-and-drop ComfyUI workflows for the 30 task modes without writing pipeline code.
+
+### Use [`kijai/ComfyUI-WanVideoWrapper`](https://github.com/kijai/ComfyUI-WanVideoWrapper) when
+
+- You want generic Wan2.1/2.2 T2V or I2V (just RGB out, not decomposition).
+- You need finer-grained per-block CPU swap, async prefetch, or kijai-curated FP8/GGUF Wan checkpoints. Their wrapper has more model-management surface; ours has the UniVidX-specific decomposition head.
 
 ## Visual tour
 
@@ -33,21 +45,26 @@ Same source clip, alpha variant + mode `R2PFB`. The **alpha matte** is a true bi
 ## Quick start
 
 ```bash
-# 1. Install
+# 1. Install. The --recurse-submodules flag pulls in the UniVidX vendor
+#    repo (~500 MB of upstream Python + small assets — no Git LFS needed).
 cd ComfyUI/custom_nodes
 git clone --recurse-submodules https://github.com/dreamrec/UniVidX_ComfyUI.git
 cd UniVidX_ComfyUI
 python -m pip install -r requirements.txt
-python install.py
+python install.py        # creates Win junction / POSIX symlink. No admin needed.
 
-# 2. Download models (~83 GB total, manual)
+# 2. Install the Hugging Face CLI if you don't have it, then download models.
+#    ~83 GB total — UniVidX is built on Wan2.1-T2V-14B which is the bulk.
+pip install -U "huggingface_hub[cli]"
 hf download Wan-AI/Wan2.1-T2V-14B  --local-dir ComfyUI/models/wan21_t2v_14b
 hf download houyuanchen/UniVidX    --local-dir ComfyUI/models/unividx
 
 # 3. Restart ComfyUI, drag examples/t2RAIN_basic.json onto the canvas, queue.
 ```
 
-For real video conditioning (your own MP4), see [`examples/R2AIN_video_api.json`](examples/R2AIN_video_api.json) and [`examples/R2PFB_video_api.json`](examples/R2PFB_video_api.json) — they use `VHS_LoadVideoPath` from [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite).
+**ComfyUI Desktop / portable / manual** — paths above assume a layout where `ComfyUI/models/` is a sibling of `ComfyUI/custom_nodes/`. ComfyUI Desktop installs put `models/` under `Documents/ComfyUI/`; the `python install.py` step auto-resolves either layout.
+
+For real video-clip conditioning (your own MP4), use [`examples/R2AIN_video_api.json`](examples/R2AIN_video_api.json) (intrinsic) or [`examples/R2PFB_video_api.json`](examples/R2PFB_video_api.json) (alpha). They load 21 evenly-spaced frames from disk via `VHS_LoadVideoPath`, which means you'll also need [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) installed.
 
 ## Two presets to remember
 

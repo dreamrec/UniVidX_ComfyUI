@@ -6,11 +6,11 @@ import torch
 
 try:
     from ..src.modes import required_inputs, validate_mode
-    from ..src.runtime import unividx_cwd
+    from ..src.runtime import unividx_cwd, _restore_native_sdpa_if_polluted
     from ..src.tensor_io import image_batch_to_video_tensor
 except ImportError:
     from src.modes import required_inputs, validate_mode
-    from src.runtime import unividx_cwd
+    from src.runtime import unividx_cwd, _restore_native_sdpa_if_polluted
     from src.tensor_io import image_batch_to_video_tensor
 
 # UniVidX's standard Chinese negative prompt — same as the inference scripts'.
@@ -142,6 +142,14 @@ class UniVidXSampler:
             "training_mode": mode,
             **video_tensors,
         }
+
+        # Re-run the SDPA un-pollute defensively. ComfyUI may have queued
+        # other nodes between load_model() and this sample() call — if any
+        # of them re-pollutes torch.nn.functional.scaled_dot_product_attention
+        # (e.g. ComfyUI-3D-Pack's Stable3DGen does this when sageattention
+        # is installed), UniVidX's VAE call would route to sage and crash
+        # on its 1-head head_dim=channel_count attention.
+        _restore_native_sdpa_if_polluted()
 
         with torch.no_grad(), unividx_cwd():
             video_dict = model_instance.pipe(**inference_params)

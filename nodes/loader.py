@@ -98,9 +98,10 @@ class UniVidXLoader:
              vram_buffer_gb: float = 4.0):
         # FP8 path: load as bfloat16 (UniVidX construction is hardcoded BF16),
         # then post-quantize the DiT via mmgp/optimum-quanto.
+        # `fp8_variant` is the optimum-quanto qtype name (or None for non-FP8
+        # dtypes); load_model uses None as the "skip quantization" sentinel.
         fp8_variant = {"fp8_e4m3fn": "qfloat8", "fp8_e5m2": "qfloat8_e5m2"}.get(dtype)
-        quantize_fp8 = fp8_variant is not None
-        compute_dtype = torch.bfloat16 if quantize_fp8 \
+        compute_dtype = torch.bfloat16 if fp8_variant is not None \
             else {"bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
         model = load_model(variant, device="cuda", dtype=compute_dtype,
                            vram_buffer=float(vram_buffer_gb),

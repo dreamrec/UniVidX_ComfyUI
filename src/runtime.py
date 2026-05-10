@@ -12,12 +12,25 @@ Responsibilities:
 """
 import contextlib
 import json
+import logging
 import os
 import sys
 import threading
 from pathlib import Path
 
+# Fail fast on stale ComfyUI installs that drop this folder into a
+# Python 3.9 runtime — the `str | None` PEP 604 union syntax later in
+# this module would otherwise raise a cryptic SyntaxError that surfaces
+# as a vague node-load failure in the ComfyUI log.
+if sys.version_info < (3, 10):
+    raise RuntimeError(
+        "UniVidX_ComfyUI requires Python 3.10+. "
+        f"Current interpreter: {sys.version.split()[0]}"
+    )
+
 import torch
+
+_log = logging.getLogger("unividx")
 
 from .path_resolver import ensure_symlinks, resolve_paths
 
@@ -94,7 +107,11 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
 
     paths = resolve_paths(_comfy_root())
     ckpt = paths[f"univid_{variant}_ckpt"]
-    cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
+    # `vram_buffer` is intentionally omitted — the underlying API is a
+    # no-op on current diffsynth (see Loader tooltip + README), so
+    # including it would cause spurious double-loads when two loader
+    # nodes in the same graph differ only in this dead value.
+    cache_key = (variant, ckpt, device, dtype,
                  quantize_fp8, bool(compile_dit), bool(prefer_sage_attn))
 
     with _LOAD_LOCK:
@@ -169,7 +186,15 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             # flash_attention() copy that the CMSA path uses, separate
             # from DiffSynth's. We patch both.
             if prefer_sage_attn:
-                _force_sage_over_fa2()
+                if not _force_sage_over_fa2():
+                    _log.warning(
+                        "prefer_sage_attn=True but the SageAttention "
+                        "dispatcher could not be installed. Most likely "
+                        "cause: `sageattention` is not importable in "
+                        "this venv (try `pip install sageattention` or "
+                        "the woct0rdho prebuilt wheel — see README). "
+                        "Continuing with default attention backend."
+                    )
 
             if quantize_fp8:
                 _quantize_dit_fp8(model, qtype=quantize_fp8)
@@ -257,6 +282,24 @@ def _restore_native_sdpa_if_polluted() -> bool:
     return True
 
 
+# De-duplication map: (backend, head_dim, exc-type-name) -> True once warned.
+_attention_fallback_warned: set = set()
+
+
+def _warn_attention_fallback(backend: str, head_dim: int, exc: BaseException) -> None:
+    """Log once per (backend, head_dim, exc-type) so we don't spam the
+    console at every sampler step but still surface real failures."""
+    key = (backend, head_dim, type(exc).__name__)
+    if key in _attention_fallback_warned:
+        return
+    _attention_fallback_warned.add(key)
+    _log.warning(
+        "%s attention failed for head_dim=%d, falling back to next "
+        "backend in chain. Cause: %s: %s",
+        backend, head_dim, type(exc).__name__, exc,
+    )
+
+
 def _force_sage_over_fa2() -> bool:
     """Replace DiffSynth's Wan DiT attention with a SageAttention-first
     wrapper that falls back to FA2 (then SDPA) per-call.
@@ -323,8 +366,12 @@ def _force_sage_over_fa2() -> bool:
             v2 = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
             x = sageattn(q2, k2, v2)
             return rearrange(x, "b n s d -> b s (n d)", n=num_heads)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Log once per (head_dim, exc-type) tuple so we don't spam the
+            # console on every step but still surface real numerical
+            # failures (CUDA OOM, NaN, dtype mismatch) instead of
+            # silently degrading to SDPA.
+            _warn_attention_fallback("sage", head_dim, exc)
 
         if _FA2 is not None:
             try:
@@ -333,8 +380,8 @@ def _force_sage_over_fa2() -> bool:
                 v2 = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
                 x = _FA2(q2, k2, v2)
                 return rearrange(x, "b s n d -> b s (n d)", n=num_heads)
-            except Exception:
-                pass
+            except Exception as exc:
+                _warn_attention_fallback("FA2", head_dim, exc)
 
         q2 = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
         k2 = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
