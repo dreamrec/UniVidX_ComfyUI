@@ -95,7 +95,12 @@ jobs:
       - name: Unit tests (modes + path_resolver — no torch required)
         run: |
           python -m pip install --upgrade pip pytest
-          # Skip test_tensor_io.py because it needs torch — would balloon CI install time.
-          # Tensor IO is exercised end-to-end by the 10-test integration matrix on the
-          # developer's GPU machine; CI just guards the pure-Python helpers.
-          python -m pytest tests/test_modes.py tests/test_path_resolver.py -v
+          # `--import-mode=importlib` keeps pytest from making the project root
+          # a package — without it, importing any test would trigger our
+          # __init__.py which `import torch`s indirectly through nodes/loader.py.
+          # We deliberately skip tests/test_tensor_io.py here because it needs
+          # torch; tensor IO is exercised end-to-end by the 10-test integration
+          # matrix on the developer's GPU machine. CI guards the pure-Python
+          # helpers (modes.py, path_resolver.py).
+          python -m pytest tests/test_modes.py tests/test_path_resolver.py \
+            --import-mode=importlib -v
