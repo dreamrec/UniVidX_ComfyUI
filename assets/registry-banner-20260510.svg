@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2100 900" role="img" aria-labelledby="title desc">
+  <title id="title">UniVidX — Intrinsic &amp; Alpha Decomposition for ComfyUI</title>
+  <desc id="desc">Four panels showing the four intrinsic-decomposition modalities of UniVidX — RGB, Albedo, Irradiance, Normal — flowing from a unified video source.</desc>
+
+  <defs>
+    <!-- Page background -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a18"/>
+      <stop offset="100%" stop-color="#0e0e1c"/>
+    </linearGradient>
+
+    <!-- Inner stage background -->
+    <linearGradient id="stage" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0e0c1c"/>
+      <stop offset="100%" stop-color="#13101e"/>
+    </linearGradient>
+
+    <!-- Soft vignette -->
+    <radialGradient id="vignette" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.55"/>
+    </radialGradient>
+
+    <!-- RGB modality: full-color sphere with warm-cool sweep -->
+    <radialGradient id="rgb-sphere" cx="36%" cy="32%" r="78%">
+      <stop offset="0%"  stop-color="#fff7e0"/>
+      <stop offset="22%" stop-color="#ffd58a"/>
+      <stop offset="48%" stop-color="#ff8a4a"/>
+      <stop offset="72%" stop-color="#a83a78"/>
+      <stop offset="100%" stop-color="#221033"/>
+    </radialGradient>
+
+    <!-- Albedo: same hues but flatter, less contrast -->
+    <radialGradient id="albedo-sphere" cx="40%" cy="36%" r="78%">
+      <stop offset="0%"  stop-color="#f5e0c2"/>
+      <stop offset="40%" stop-color="#d8b48a"/>
+      <stop offset="75%" stop-color="#a17a55"/>
+      <stop offset="100%" stop-color="#3a2a1c"/>
+    </radialGradient>
+
+    <!-- Irradiance: smooth lighting field, no detail -->
+    <radialGradient id="irr-sphere" cx="38%" cy="34%" r="80%">
+      <stop offset="0%"  stop-color="#fff8c0"/>
+      <stop offset="55%" stop-color="#bfb678"/>
+      <stop offset="100%" stop-color="#1d1c14"/>
+    </radialGradient>
+
+    <!-- Normal map: classic xyz-to-rgb encoding -->
+    <radialGradient id="normal-sphere" cx="36%" cy="34%" r="80%">
+      <stop offset="0%"  stop-color="#9affb0"/>
+      <stop offset="32%" stop-color="#5588ff"/>
+      <stop offset="62%" stop-color="#a05cff"/>
+      <stop offset="100%" stop-color="#241640"/>
+    </radialGradient>
+
+    <!-- Card surfaces -->
+    <linearGradient id="card" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a1726" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#10101c" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <!-- Connecting flow line -->
+    <linearGradient id="flow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"  stop-color="#3a8c7c" stop-opacity="0.0"/>
+      <stop offset="15%" stop-color="#3a8c7c" stop-opacity="0.5"/>
+      <stop offset="50%" stop-color="#4a5fc1" stop-opacity="0.7"/>
+      <stop offset="85%" stop-color="#c14a8e" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#c97a3a" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <!-- Page bg -->
+  <rect width="2100" height="900" fill="url(#bg)"/>
+  <rect width="2100" height="900" fill="url(#vignette)"/>
+
+  <!-- Inner stage card (very subtle) -->
+  <rect x="60" y="60" width="1980" height="780" rx="36" fill="url(#stage)" stroke="#1f1d2c" stroke-width="2"/>
+
+  <!-- ============================ Title ============================ -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+    <text x="120" y="200" font-size="170" font-weight="800" fill="#ffffff" letter-spacing="-3">UniVidX</text>
+    <text x="120" y="262" font-size="42" font-weight="500" fill="#9ea2b8" letter-spacing="0">Intrinsic &amp; Alpha Decomposition for ComfyUI</text>
+    <text x="120" y="306" font-size="28" font-weight="400" fill="#5e637a" letter-spacing="0.5">SIGGRAPH 2026 · 30 task modes · 5 nodes · Strategy A wrapper</text>
+  </g>
+
+  <!-- ============================ Decomposition row ============================ -->
+  <!-- 4 panels arranged horizontally with generous spacing.
+       Each shows: card with rounded corners, sphere with modality gradient, label below. -->
+  <g transform="translate(120, 460)">
+
+    <!-- Connecting flow line behind the panels -->
+    <rect x="0" y="158" width="1860" height="4" fill="url(#flow)"/>
+
+    <!-- Panel: RGB -->
+    <g transform="translate(0, 0)">
+      <rect x="0" y="0" width="430" height="320" rx="20" fill="url(#card)" stroke="#27243c" stroke-width="2"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#rgb-sphere)" filter="url(#soft-shadow)"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#rgb-sphere)"/>
+      <text x="215" y="298" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="32" font-weight="700" fill="#e8e8f0" letter-spacing="3">RGB</text>
+    </g>
+
+    <!-- Panel: Albedo -->
+    <g transform="translate(490, 0)">
+      <rect x="0" y="0" width="430" height="320" rx="20" fill="url(#card)" stroke="#27243c" stroke-width="2"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#albedo-sphere)" filter="url(#soft-shadow)"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#albedo-sphere)"/>
+      <text x="215" y="298" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="32" font-weight="700" fill="#e8e8f0" letter-spacing="3">ALBEDO</text>
+    </g>
+
+    <!-- Panel: Irradiance -->
+    <g transform="translate(980, 0)">
+      <rect x="0" y="0" width="430" height="320" rx="20" fill="url(#card)" stroke="#27243c" stroke-width="2"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#irr-sphere)" filter="url(#soft-shadow)"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#irr-sphere)"/>
+      <text x="215" y="298" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="32" font-weight="700" fill="#e8e8f0" letter-spacing="3">IRRADIANCE</text>
+    </g>
+
+    <!-- Panel: Normal -->
+    <g transform="translate(1470, 0)">
+      <rect x="0" y="0" width="430" height="320" rx="20" fill="url(#card)" stroke="#27243c" stroke-width="2"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#normal-sphere)" filter="url(#soft-shadow)"/>
+      <ellipse cx="215" cy="160" rx="120" ry="120" fill="url(#normal-sphere)"/>
+      <text x="215" y="298" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="32" font-weight="700" fill="#e8e8f0" letter-spacing="3">NORMAL</text>
+    </g>
+
+  </g>
+
+  <!-- ============================ Footer ============================ -->
+  <g font-family="-apple-system, sans-serif">
+    <text x="120" y="822" font-size="22" font-weight="500" fill="#5e637a" letter-spacing="2">DREAMREC · github.com/dreamrec/UniVidX_ComfyUI · GPL-3.0</text>
+    <text x="1980" y="822" text-anchor="end" font-size="22" font-weight="500" fill="#5e637a" letter-spacing="0">unified video diffusion · Wan2.1-T2V-14B</text>
+  </g>
+
+</svg>

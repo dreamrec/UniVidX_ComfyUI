@@ -1,5 +1,8 @@
+![UniVidX banner](assets/registry-banner-20260510.svg)
+
 # UniVidX Intrinsic & Alpha Decomposition for ComfyUI
 
+[![Smoke Test](https://github.com/dreamrec/UniVidX_ComfyUI/actions/workflows/smoke.yml/badge.svg)](https://github.com/dreamrec/UniVidX_ComfyUI/actions/workflows/smoke.yml)
 ![License](https://img.shields.io/badge/license-GPL--3.0-2f855a)
 ![Python](https://img.shields.io/badge/python-3.10%2B-1f4b99)
 ![PyTorch](https://img.shields.io/badge/torch-%E2%89%A52.7%2Bcu128-ee4c2c)

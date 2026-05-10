@@ -1,0 +1,101 @@
+name: Smoke Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Compile all Python sources
+        run: |
+          python -m compileall \
+            __init__.py \
+            install.py \
+            conftest.py \
+            src nodes tests examples
+
+      - name: Validate package metadata + bundled assets
+        run: |
+          python - <<'PY'
+          import json, tomllib
+          from pathlib import Path
+
+          # pyproject.toml: required fields, registry-publisher metadata
+          py = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          assert py["project"]["name"] == "unividx-comfyui", py["project"]["name"]
+          assert py["tool"]["comfy"]["PublisherId"] == "dreamrec"
+          assert py["tool"]["comfy"]["requires-comfyui"].startswith(">=")
+
+          # Required top-level files
+          for path in ["README.md", "LICENSE", "requirements.txt", "install.py",
+                       "__init__.py", "src/runtime.py", "src/path_resolver.py",
+                       "src/modes.py", "src/tensor_io.py",
+                       "nodes/loader.py", "nodes/task.py",
+                       "nodes/sampler.py", "nodes/decoder.py"]:
+              assert Path(path).exists(), f"missing: {path}"
+
+          # Banner asset present
+          banners = list(Path("assets").glob("registry-banner-*.svg"))
+          assert banners, "no registry banner SVG in assets/"
+
+          # All UI-format demo workflows referenced by install.py exist
+          # (regex scans the whole file — inline comments mention .json filenames
+          # only inside the DEMO_WORKFLOW_NAMES tuple, so scoping to the tuple
+          # is unnecessary and a non-greedy '\(.*?\)' would mis-match closing
+          # parens in the comments anyway.)
+          install_py = Path("install.py").read_text(encoding="utf-8")
+          import re
+          demo_files = re.findall(r'"([A-Za-z][A-Za-z0-9_]*\.json)"', install_py)
+          assert demo_files, "could not extract demo workflow names from install.py"
+          for name in demo_files:
+              fp = Path("examples") / name
+              assert fp.exists(), f"missing demo workflow: {fp}"
+              wf = json.loads(fp.read_text(encoding="utf-8"))
+              # UI-format workflows have nodes + groups arrays
+              assert "nodes" in wf and "groups" in wf, f"{fp} is not UI format"
+              # Each must validate spacing rules (group bboxes don't overlap)
+              groups = wf.get("groups", [])
+              for i, a in enumerate(groups):
+                  ax, ay, aw, ah = a["bounding"]
+                  for b in groups[i + 1:]:
+                      bx, by, bw, bh = b["bounding"]
+                      overlap = not (ax + aw <= bx or bx + bw <= ax
+                                      or ay + ah <= by or by + bh <= ay)
+                      assert not overlap, f"{fp} groups {a['title']!r} and {b['title']!r} overlap"
+
+          # Every workflow JSON in examples/ parses cleanly
+          for fp in Path("examples").rglob("*.json"):
+              json.loads(fp.read_text(encoding="utf-8"))
+
+          # Vendor submodule populated at the pinned commit's expected paths
+          for path in ["vendor/UniVidX/src/pipelines/univid_intrinsic.py",
+                       "vendor/UniVidX/src/pipelines/univid_alpha.py",
+                       "vendor/UniVidX/scripts/registry.py",
+                       "vendor/UniVidX/configs/wan2_1_14b_t2v_dit_config.json"]:
+              assert Path(path).exists(), f"vendor submodule incomplete: {path}"
+
+          print("Smoke validation passed.")
+          PY
+
+      - name: Unit tests (modes + path_resolver — no torch required)
+        run: |
+          python -m pip install --upgrade pip pytest
+          # Skip test_tensor_io.py because it needs torch — would balloon CI install time.
+          # Tensor IO is exercised end-to-end by the 10-test integration matrix on the
+          # developer's GPU machine; CI just guards the pure-Python helpers.
+          python -m pytest tests/test_modes.py tests/test_path_resolver.py -v
