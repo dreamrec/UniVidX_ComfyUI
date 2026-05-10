@@ -217,13 +217,13 @@ All numbers below are **measured** on the same workflow (R2AIN, 480×640×21f, 2
 
 | Config | Wall time | Per-step | Δ vs baseline | Notes |
 |---|---|---|---|---|
-| **Baseline** (defaults) | 17.6 min | ~43.8 s | — | Includes ~3 min cold-load |
+| **Baseline** (defaults: 20 steps, cfg=5, FA2) | 17.6 min | ~43.8 s | — | Includes ~3 min cold-load |
 | `vram_buffer_gb` 4 → 12 | 16.6 min | ~43 s | **–6% (noise)** | Widget is a no-op on current diffsynth |
-| **`compile_dit = True`** | **14.55 min** | **~31.6 s** | **–17% wall, –28% per-step** | First-step pays ~90 s compile capture |
-| **`prefer_sage_attn = True`** | **14.49 min** | **~34.5 s** | **–18% wall, –21% per-step** | Quality verified visually equivalent to FA2 |
-| Both stacked (`compile_dit` + `prefer_sage_attn`) | 14.99 min | ~33 s | **–15% (slightly worse than either alone!)** | The two wins target the same per-step DiT compute and don't compose |
+| `compile_dit = True` | 14.55 min | ~31.6 s | –17% wall, –28% per-step | First-step pays ~90 s compile capture |
+| `prefer_sage_attn = True` | 14.49 min | ~34.5 s | –18% wall, –21% per-step | Quality verified visually equivalent to FA2 |
+| `compile_dit` + `prefer_sage_attn` (stacked) | 14.99 min | ~33 s | –15% (slightly worse than either alone) | The two wins target the same per-step bottleneck and don't compose |
+| **AGGRESSIVE preset:** `prefer_sage_attn` + `num_inference_steps=4` + `cfg_scale=1.0` (RGB-conditioned only) | **1.35 min** | **~10-15 s** | **–92% wall (13× speedup)** | UniVidX's flow-match scheduler is unexpectedly robust at 4 steps when paired with RGB conditioning. Quality on portrait test clip: marginally softer tie stripe in albedo, slightly less crisp facial features in normal map — all decompositions still physically correct. May degrade more on high-motion content. **Do not use for text-only modes (`t2RAIN`, `t2RPFB`)** — they need cfg≥5 + 20 steps for stable output. |
 | FP8 quant (`fp8_e4m3fn`) | *not measured* | *unknown* | *unknown* | Quanto pass over Wan2.1-14B + UniVidX LoRA stack hung after ~22 min in our cold-load test |
-| `cfg_scale = 1.0` (RGB-conditioned only) | *further ~2× on top* | *halved* | *additional –50%* | Single forward per step instead of two; mild quality cost on text-only modes, OK on RGB-conditioned |
 
 **Recommendation: pick ONE of `compile_dit` or `prefer_sage_attn`, not both.** They overlap on the same bottleneck. `prefer_sage_attn` has the slight wall edge and no warmup cost (`compile_dit` pays ~90 s graph capture on the first sampler step). For longer runs (50+ steps) the compile gain compounds further as the warmup amortizes. Visual quality verified identical to FA2 baseline on the test clip's albedo / irradiance / normal outputs.
 
@@ -250,7 +250,12 @@ Match the wheel to your stack: cu128 / cu130 (CUDA toolkit), torch2.7.1 / torch2
 
 ### Honest summary
 
-The validated wins on this stack today: **17-18% wall (~3 min off a 17.6 min baseline) from either `compile_dit` or `prefer_sage_attn` — pick one.** Higher-tier stacked speedups exist in theory but are blocked by either (a) Hopper-only requirements that don't apply to Blackwell consumer cards, (b) source-build complexity on Windows, or (c) upstream API gaps in DiffSynth + UniVidX vs newer attention backends.
+Two presets to remember:
+
+- **PRODUCTION**: `prefer_sage_attn=True` (or `compile_dit=True`, pick one), keep `num_inference_steps=20` and `cfg_scale=5.0`. ~14.5 min for 480×640×21f at full quality. Use for finals.
+- **PREVIEW / FAST ITERATION**: `prefer_sage_attn=True` + `num_inference_steps=4` + `cfg_scale=1.0` on **RGB-conditioned modes only** (`R2AIN`, `R2PFB`). **~1.4 min for the same workflow — 13× faster.** Quality is slightly softer but all decompositions remain physically correct. Use for iterating on prompts and seed selection before committing to a full-quality final pass.
+
+Higher-tier stacked speedups exist in theory but are blocked: FA3 is Hopper-only (doesn't help Blackwell), FA4 is Linux-only on PyPI with module-name mismatch vs DiffSynth, FP8 quanto hangs on the LoRA-attached DiT, and the [LightX2V step-distill LoRA](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v) — which we considered for additional 4-step quality recovery — is now lower priority since raw 4-step inference already produces production-usable output without the LoRA stacking complexity.
 
 The README previously claimed ~30 sec/step with VRAM management; that number was true under an older diffsynth version that exposed `enable_vram_management(vram_buffer=...)` on `WanVideoPipeline`. The current diffsynth removed that API — our runtime call is `hasattr`-guarded and silently no-ops, which is why the per-step is now ~43 sec rather than ~30 sec. The right fix is FA3 + compile, not the (now-cosmetic) vram_buffer knob.
 
