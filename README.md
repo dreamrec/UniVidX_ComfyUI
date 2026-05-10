@@ -64,51 +64,55 @@ Wan2.1's six DiT shards account for ~57 GB; the T5 text encoder adds ~11 GB; VAE
 
 ## Included Workflows
 
+All six demos ship as UI-format JSONs you can drag-and-drop onto the ComfyUI canvas — they come with **colour-coded groups, generous 80-px gaps between groups, and 100-px vertical gaps between stacked nodes** so the graph stays legible. Matching `*_api.json` files are auto-generated for programmatic queueing.
+
 ### `examples/t2RAIN_basic.json` — Text → All Four Intrinsic Modalities
 
 The flagship demo. Generate a 21-frame 480×640 video with full RGB / Albedo / Irradiance / Normal decomposition from a text prompt alone.
 
 ```text
-LoadModel(intrinsic) ──┐
-                       ├─→ Sample(t2RAIN) ─→ Decode (Intrinsic) ─→ 4× SaveImage
-TaskMode(t2RAIN) ──────┘
+[Model Setup]   →   [Sampling]   →   [Decode (Intrinsic)]   →   [Outputs (4× SaveImage)]
+ Loader              Sampler           DecodeIntrinsic            RGB / A / I / N
+ TaskMode
 ```
 
 Drag the JSON onto canvas, queue, get four PNG sequences. ~10 min wall time on a 5090.
 
-### `examples/R2AIN_basic_api.json` — RGB-Conditioned Re-Decomposition
+### `examples/R2AIN_basic.json` — RGB-Conditioned Re-Decomposition
 
 Provide an existing RGB video; UniVidX produces matched Albedo / Irradiance / Normal channels. The decoder's `rgb` slot becomes a black placeholder (RGB was the input, not regenerated).
 
 ```text
-LoadImage → RepeatImageBatch(21) ─→ Sample(R2AIN, rgb=...) ─→ Decode → 4× SaveImage
+[Model Setup] → [RGB Conditioning] → [Sampling] → [Decode] → [Outputs]
+                 LoadImage
+                 RepeatImageBatch
 ```
 
-### `examples/test_matrix/E_t2RPFB.json` — Alpha Decomposition (Text-to-All)
+### `examples/t2RPFB_basic.json` — Alpha Decomposition (Text-to-All)
 
-Same idea but for the **alpha** family — pulls clean foreground / background pairs and an alpha matte. Note: alpha decomposition works much better when an RGB reference is provided (see R2PFB below).
+Same idea but for the **alpha** family — produces composite RGB, alpha matte, foreground, background from text alone. Alpha decomposition works much better when an RGB reference is provided (see R2PFB below); without one, the matte tends to come out nearly all-white.
 
-### `examples/test_matrix/F_R2PFB.json` — Sharp Alpha Matte from RGB
+### `examples/R2PFB_basic.json` — Sharp Alpha Matte from RGB
 
-The most useful alpha workflow: feed an RGB clip, get a clean alpha matte + isolated foreground + clean background. The matte is a real production-grade mask, not just a visualization.
+The most useful alpha workflow: feed an RGB clip, get a clean alpha matte + isolated foreground + clean background. The matte is a real production-grade mask, not just a visualization. The `composite_rgb` slot is a black placeholder (RGB was the input).
 
-### `examples/test_matrix/J_alpha_compositing.json` — End-to-End VFX Composite
+### `examples/J_alpha_compositing.json` — End-to-End VFX Composite
 
-Demonstrates that the alpha matte is a usable mask: extract the foreground via `ImageToMask` + `ImageCompositeMasked` and paste it onto any new background.
+Demonstrates that the alpha matte is a usable mask: extracts the foreground via `ImageToMask` + `ImageCompositeMasked` and pastes it onto a synthetic cyan background. Drop your own `LoadImage` in place of `EmptyImage` to composite over a real backdrop.
 
 ```text
-Sample(R2PFB) → Decode → ImageToMask(alpha) ──┐
-                       └─→ foreground ────────┤
-                                              ├─→ ImageCompositeMasked → SaveImage
-                                EmptyImage ───┘
+[Setup] → [RGB Cond] → [Sampling] → [Decode] → [Background] → [Composite] → [Output]
+                                                EmptyImage     ImageToMask    SaveImage
+                                                               ImageCompositeMasked
 ```
 
-### `examples/test_matrix/I_video_output.json` — Direct MP4 Export
+### `examples/I_video_output.json` — Direct MP4 Export
 
-Skip the per-frame PNGs and emit one MP4 per modality via `VHS_VideoCombine`.
+Skip the per-frame PNGs and emit one MP4 per modality via `VHS_VideoCombine`. Requires [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) (already installed if your ComfyUI loads `VHS_VideoCombine`).
 
 ```text
-Sample(t2RAIN) → Decode → 4× VHS_VideoCombine
+[Setup] → [Sampling] → [Decode] → [Video Outputs (4× VHS_VideoCombine)]
+                                   rgb / albedo / irradiance / normal MP4
 ```
 
 ## Mode Reference
