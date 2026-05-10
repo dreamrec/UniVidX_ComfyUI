@@ -209,7 +209,7 @@ Three patches make this pack work on Windows out of the box. They fire automatic
    The `mmgp` library (transitive dep of DiffSynth) monkey-patches `safetensors.torch.load_file` to memory-map shards with `ACCESS_COPY`. Six 9.84 GB Wan2.1 DiT shards mmapped concurrently require ~60 GB of Windows paging-file commit, which exceeds most users' default and surfaces as `[WinError 1455] The paging file is too small`. We monkey-patch `load_file` inside UniVidX's pipeline namespaces to use `writable_tensors=False` (`ACCESS_READ` — no commit charge needed since UniVidX only reads tensors before copying to GPU).
 
 3. **Junctions and hardlinks instead of symlinks** (`src/path_resolver.py`).
-   `os.symlink()` on Windows requires Administrator privileges or Developer Mode. We use `mklink /J` (directory junction) for the Wan2.1 model dir link and `os.link()` (hardlink) for individual checkpoint files. Both work without privileges. Cross-volume hardlinks fall back to `shutil.copy2` (~1.5 GB extra disk if your `models/` and the comfyui-unividx repo are on different volumes).
+   `os.symlink()` on Windows requires Administrator privileges or Developer Mode. We use `mklink /J` (directory junction) for the Wan2.1 model dir link and `os.link()` (hardlink) for individual checkpoint files. Both work without privileges. Cross-volume hardlinks fall back to `shutil.copy2` (~1.5 GB extra disk if your `models/` and the `UniVidX_ComfyUI` repo are on different volumes).
 
 ## Troubleshooting
 

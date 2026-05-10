@@ -8,12 +8,20 @@ flows into the sampler.
 import torch
 
 try:
-    from ..src.runtime import load_model  # when imported as part of comfyui-unividx package (ComfyUI)
+    from ..src.runtime import load_model  # when imported as the UniVidX_ComfyUI package (ComfyUI runtime)
 except ImportError:
     from src.runtime import load_model    # when imported flat (smoke test)
 
 
 class UniVidXLoader:
+    """Load the intrinsic or alpha UniVidX variant.
+
+    Outputs the opaque ``UNIVIDX_MODEL`` tuple ``(model_instance, variant_name)``
+    that flows into ``UniVidXSampler``. Models are cached per
+    ``(variant, ckpt, device, dtype)`` in ``src.runtime`` so multi-graph
+    sessions reuse weights instead of reloading the 28 GB DiT.
+    """
+
     @classmethod
     def INPUT_TYPES(cls):
         return {

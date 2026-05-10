@@ -50,6 +50,15 @@ def _decode(result_dict, mode: str, expected_keys):
 
 
 class UniVidXDecodeIntrinsic:
+    """Splay an intrinsic-family ``UNIVIDX_RESULT`` into 4 IMAGE batches.
+
+    Outputs ``rgb / albedo / irradiance / normal``. Modalities that were a
+    *condition* for the active mode (rather than a target) come back as a black
+    placeholder ``IMAGE`` of the right shape so downstream nodes don't break.
+    Raises ``ValueError`` if the mode is alpha-family — use
+    ``UniVidXDecodeAlpha`` for those.
+    """
+
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"result": ("UNIVIDX_RESULT",)}}
@@ -71,6 +80,14 @@ class UniVidXDecodeIntrinsic:
 
 
 class UniVidXDecodeAlpha:
+    """Splay an alpha-family ``UNIVIDX_RESULT`` into 4 IMAGE batches.
+
+    Outputs ``composite_rgb / alpha / foreground / background``. Modalities that
+    were a *condition* for the active mode (rather than a target) come back as
+    a black placeholder ``IMAGE`` of the right shape. Raises ``ValueError`` if
+    the mode is intrinsic-family — use ``UniVidXDecodeIntrinsic`` for those.
+    """
+
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"result": ("UNIVIDX_RESULT",)}}

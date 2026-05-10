@@ -10,11 +10,11 @@ Letter codes:
     Intrinsic family: R=rgb, A=albedo, I=irradiance, N=normal
     Alpha family:     R=composite (com), P=pha, F=fgr, B=bgr
 """
-from typing import Dict, List, Set
+from typing import List, Set
 
 
 class InvalidModeError(ValueError):
-    pass
+    """Raised when a mode string isn't in INTRINSIC_MODES or ALPHA_MODES."""
 
 
 # Mapping from intrinsic letter codes to the keys returned by UniVidX's pipe()

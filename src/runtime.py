@@ -16,7 +16,6 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
 
 import torch
 
@@ -24,7 +23,7 @@ from .path_resolver import ensure_symlinks, resolve_paths
 
 
 _THIS_DIR = Path(__file__).resolve().parent
-_PLUGIN_ROOT = _THIS_DIR.parent  # custom_nodes/comfyui-unividx/
+_PLUGIN_ROOT = _THIS_DIR.parent  # custom_nodes/UniVidX_ComfyUI/
 _UNIVIDX_ROOT = _PLUGIN_ROOT / "vendor" / "UniVidX"
 
 _LOAD_LOCK = threading.Lock()

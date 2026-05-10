@@ -2,9 +2,9 @@
 Submit examples/t2RAIN_basic.json to ComfyUI's /prompt API and watch progress.
 
 Run with the venv Python:
-    python examples\_smoke_runner.py
+    python examples\\_smoke_runner.py
 
-ComfyUI must already be running on 127.0.0.1:8001 with the comfyui-unividx
+ComfyUI must already be running on 127.0.0.1:8000 with the UniVidX_ComfyUI
 custom node loaded.
 """
 import json

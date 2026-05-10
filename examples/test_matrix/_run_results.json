@@ -1,9 +1,0 @@
-[
-  {
-    "id": "J_alpha_compositing",
-    "outcome": "success",
-    "elapsed": 25.09287428855896,
-    "verdict": "PASS",
-    "detail": "matrix_J_composite_over_cyan_00005_.png: bg=89.3% fg=10.7%"
-  }
-]

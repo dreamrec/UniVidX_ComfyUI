@@ -187,7 +187,7 @@ forces a reload, but consecutive same-variant tests reuse the loaded model.
 ## Reproducing this report
 
 ```bash
-cd ${COMFY_ROOT}/custom_nodes/comfyui-unividx
+cd ${COMFY_ROOT}/custom_nodes/UniVidX_ComfyUI
 # Stage input images
 cp output/unividx_t2RAIN_rgb_00011_.png       input/unividx_R2AIN_input.png
 cp output/unividx_t2RAIN_albedo_00011_.png    input/unividx_input_albedo.png

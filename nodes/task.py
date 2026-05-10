@@ -11,6 +11,13 @@ except ImportError:
 
 
 class UniVidXTaskMode:
+    """Pick one of the 30 task modes via a dropdown.
+
+    Outputs ``UNIVIDX_TASK = (mode_string, family)`` where ``family`` is
+    ``"intrinsic"`` or ``"alpha"`` — the sampler uses it to validate that the
+    selected mode matches the loaded model variant.
+    """
+
     @classmethod
     def INPUT_TYPES(cls):
         return {

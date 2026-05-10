@@ -1,6 +1,5 @@
 # tests/test_tensor_io.py
 import torch
-import pytest
 
 from src.tensor_io import (
     image_batch_to_video_tensor,

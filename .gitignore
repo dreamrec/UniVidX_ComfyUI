@@ -7,3 +7,6 @@ dist/
 build/
 *.egg-info/
 outputs/
+
+# Test-runner artifact (regenerated each run)
+examples/test_matrix/_run_results.json

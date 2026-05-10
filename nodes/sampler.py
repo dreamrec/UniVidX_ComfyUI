@@ -5,11 +5,11 @@ UniVidXSampler: run UniVidX's pipe() inside the chdir context.
 import torch
 
 try:
-    from ..src.modes import family_of, output_keys, required_inputs, validate_mode
+    from ..src.modes import required_inputs, validate_mode
     from ..src.runtime import unividx_cwd
     from ..src.tensor_io import image_batch_to_video_tensor
 except ImportError:
-    from src.modes import family_of, output_keys, required_inputs, validate_mode
+    from src.modes import required_inputs, validate_mode
     from src.runtime import unividx_cwd
     from src.tensor_io import image_batch_to_video_tensor
 
@@ -24,6 +24,16 @@ DEFAULT_NEGATIVE_PROMPT = (
 
 
 class UniVidXSampler:
+    """Run UniVidX's ``pipe()`` end-to-end.
+
+    Accepts up to 7 optional ``IMAGE`` inputs (one per modality across both
+    families); inputs not required by the active mode are silently ignored.
+    Validates that the loaded model variant matches the task mode's family
+    before any sampling work, and that all of the mode's required inputs are
+    wired. Returns an opaque ``UNIVIDX_RESULT`` (the dict UniVidX's
+    ``pipe()`` returned, plus the mode string) for the decoder to splay.
+    """
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
