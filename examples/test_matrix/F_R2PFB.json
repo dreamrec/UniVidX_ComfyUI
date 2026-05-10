@@ -1,0 +1,107 @@
+{
+  "1": {
+    "class_type": "UniVidXLoader",
+    "inputs": {
+      "variant": "alpha",
+      "dtype": "bfloat16"
+    }
+  },
+  "2": {
+    "class_type": "UniVidXTaskMode",
+    "inputs": {
+      "mode": "R2PFB"
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "unividx_R2AIN_input.png"
+    }
+  },
+  "11": {
+    "class_type": "RepeatImageBatch",
+    "inputs": {
+      "image": [
+        "10",
+        0
+      ],
+      "amount": 5
+    }
+  },
+  "3": {
+    "class_type": "UniVidXSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "task": [
+        "2",
+        0
+      ],
+      "prompt": "a small hedgehog wearing a chef hat in a tiny kitchen",
+      "negative_prompt": "色调艳丽，过曝，静态，细节模糊不清",
+      "num_inference_steps": 3,
+      "cfg_scale": 5.0,
+      "denoising_strength": 1.0,
+      "num_frames": 5,
+      "height": 256,
+      "width": 256,
+      "seed": 42,
+      "tiled": true,
+      "rgb": [
+        "11",
+        0
+      ]
+    }
+  },
+  "4": {
+    "class_type": "UniVidXDecodeAlpha",
+    "inputs": {
+      "result": [
+        "3",
+        0
+      ]
+    }
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ],
+      "filename_prefix": "matrix_F_R2PFB_composite_rgb"
+    }
+  },
+  "6": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        1
+      ],
+      "filename_prefix": "matrix_F_R2PFB_alpha"
+    }
+  },
+  "7": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        2
+      ],
+      "filename_prefix": "matrix_F_R2PFB_foreground"
+    }
+  },
+  "8": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        3
+      ],
+      "filename_prefix": "matrix_F_R2PFB_background"
+    }
+  }
+}

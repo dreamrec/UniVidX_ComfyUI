@@ -1,0 +1,16 @@
+[
+  {
+    "id": "G_error_family_mismatch",
+    "outcome": "error",
+    "elapsed": 5.000078201293945,
+    "verdict": "PASS",
+    "detail": "error message contains 'family'"
+  },
+  {
+    "id": "H_error_missing_input",
+    "outcome": "error",
+    "elapsed": 5.000913858413696,
+    "verdict": "PASS",
+    "detail": "error message contains 'missing'"
+  }
+]
