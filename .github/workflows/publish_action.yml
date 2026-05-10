@@ -19,4 +19,7 @@ jobs:
       - name: Publish Custom Node
         uses: Comfy-Org/publish-node-action@main
         with:
-          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+          # Secret name matches dreamrec's other ComfyUI repos
+          # (MatAnyone2_ComfyUI etc.) so a single registry token can be
+          # rotated across all of them without renaming per-repo.
+          personal_access_token: ${{ secrets.COMFYUI }}

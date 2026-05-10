@@ -82,15 +82,16 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
 
     variant: 'intrinsic' or 'alpha'.
     vram_buffer: GB of VRAM kept free for activations / KV cache / VAE
-        decode. Passed straight to UniVidX's pipeline-level
-        `enable_vram_management(vram_buffer=...)` (see
-        `vendor/UniVidX/src/pipelines/univid_intrinsic.py`), which wraps
-        the text encoder, DiT, and VAE through DiffSynth's low-level
-        `enable_vram_management()` helper so layers live on CPU and
-        stream to GPU only during forward. Higher values = more free
-        VRAM but slower (more streaming); lower values pack more model
-        in residency. On a 32 GB GPU, ~4.0 is a sane default for BF16
-        Wan2.1-14B + LoRAs.
+        decode. Passed to `model.pipe.enable_vram_management(vram_buffer=...)`
+        — the method lives on UniVidX's OWN WanVideoPipeline subclass
+        (vendor/UniVidX/src/pipelines/univid_intrinsic.py:24, method at
+        line 210), NOT on UniVidIntrinsic itself or on DiffSynth's stock
+        WanVideoPipeline. It wraps text encoder + DiT + VAE through
+        DiffSynth's low-level enable_vram_management() helper so layers
+        live on CPU and stream to GPU only during forward. Higher =
+        more free VRAM but slower (more streaming); lower = more
+        residency. 4.0 is a sane default for BF16 Wan2.1-14B + LoRAs on
+        32 GB cards.
     quantize_fp8: None (default), or one of optimum-quanto's qtype names —
         "qfloat8" (e4m3, larger mantissa) or "qfloat8_e5m2" (larger
         exponent). Post-quantizes the DiT via mmgp.offload.quantize.
@@ -201,28 +202,33 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
                 _quantize_dit_fp8(model, qtype=quantize_fp8)
 
             # Wire vram_buffer to UniVidX's pipeline-level VRAM manager.
-            # UniVidIntrinsic / UniVidAlpha define enable_vram_management()
-            # themselves (vendor/UniVidX/src/pipelines/univid_*.py) — it
-            # wraps text encoder + DiT + VAE through DiffSynth's low-level
-            # helper. The bf16 DiT is ~28 GB; without this the model
-            # alone saturates a 32 GB card and per-step balloons to
-            # 2-3+ min. With it, per-step is ~30 sec.
-            if hasattr(model, "enable_vram_management"):
+            # The method lives on `model.pipe` — an instance of UniVidX's
+            # OWN WanVideoPipeline subclass (vendor/UniVidX/src/pipelines/
+            # univid_intrinsic.py:24, with enable_vram_management() at
+            # line 210), NOT DiffSynth's stock WanVideoPipeline.
+            # UniVidIntrinsic / UniVidAlpha themselves don't define it —
+            # they delegate to their `.pipe` attribute. The method wraps
+            # text encoder + DiT + VAE through DiffSynth's low-level
+            # offload helper. The bf16 DiT is ~28 GB; without this the
+            # model alone saturates a 32 GB card and per-step balloons
+            # to 2-3+ min. With it, per-step is ~30 sec.
+            pipe = getattr(model, "pipe", None)
+            if pipe is not None and hasattr(pipe, "enable_vram_management"):
                 try:
-                    model.enable_vram_management(vram_buffer=float(vram_buffer))
+                    pipe.enable_vram_management(vram_buffer=float(vram_buffer))
                     _log.info("VRAM management enabled with vram_buffer=%.1f GB",
                               float(vram_buffer))
                 except TypeError as exc:
                     _log.warning(
-                        "model.enable_vram_management(vram_buffer=...) "
+                        "model.pipe.enable_vram_management(vram_buffer=...) "
                         "rejected the kwarg: %s. VRAM management was NOT "
                         "applied — sampling may OOM or be memory-bound.",
                         exc,
                     )
             else:
                 _log.warning(
-                    "Model class %s lacks enable_vram_management(); "
-                    "vram_buffer_gb has no effect on this build.",
+                    "model.pipe.enable_vram_management() not found on "
+                    "%s; vram_buffer_gb has no effect on this build.",
                     type(model).__name__,
                 )
 
