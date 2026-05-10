@@ -187,9 +187,10 @@ For modes where a modality is a *condition*, the corresponding decoder output is
 
 ## Roadmap
 
-Planned for the next iteration:
+Full v0.3 execution plan in [`ROADMAP_v0.3.md`](ROADMAP_v0.3.md). Summary of priority order (corrected after second-pass review):
 
-- **FP8 via pre-quantized weights** (replaces the hung runtime-quantize path). The current `dtype=fp8_*` knob calls `mmgp.offload.quantize()` AFTER constructing a full BF16 DiT — which both hangs and destroys the main benefit (the BF16 cold load). Right design is a deeper refactor:
+1. **`vram_buffer_gb` correctness fix** — present bug, not future work. The widget is documented as "deprecated, no-op" but the only reason it's a no-op is that `runtime.py` calls `model.pipe.enable_vram_management(...)` (DiffSynth's `WanVideoPipeline`, no such method) instead of `model.enable_vram_management(...)` — which UniVidX's pipeline classes DO define at [`vendor/UniVidX/src/pipelines/univid_intrinsic.py:210`](vendor/UniVidX/src/pipelines/univid_intrinsic.py) and `univid_alpha.py:203`. One-line fix unlocks working VRAM management; cache key needs `vram_buffer` re-added once active. **Do this first** — it's a 1-day correctness fix, ahead of FP8.
+2. **FP8 via pre-quantized Kijai weights** (replaces the hung runtime-quantize path). The current `dtype=fp8_*` knob calls `mmgp.offload.quantize()` AFTER constructing a full BF16 DiT — which both hangs and destroys the main benefit (the BF16 cold load). Right design is a deeper refactor:
   1. **Split the public knob** into `compute_dtype = {bf16, fp16}` and `dit_weight_mode = {bf16_shards, fp8_prequantized, fp8_runtime_experimental}` so users get clear choices and runtime quantization is hidden behind an explicit experimental flag.
   2. **Add path resolution** for pre-quantized weights at `ComfyUI/models/diffusion_models/Wan2_1-T2V-14B_fp8_e4m3fn.safetensors` (Kijai/ComfyUI convention).
   3. **Implement an alternate DiT loader** that bypasses upstream's hardcoded six-shard BF16 loop in [`vendor/UniVidX/src/pipelines/univid_intrinsic.py:447`](vendor/UniVidX/src/pipelines/univid_intrinsic.py) and `univid_alpha.py:425`. Instantiate `WanModel`, normalize key prefixes, stream-load FP8 safetensors, keep norms/bias/time/text/patch/head in BF16/FP32, and preserve scale tensors when present.
