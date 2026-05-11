@@ -66,7 +66,7 @@ ComfyUI custom nodes for [UniVidX](https://houyuanchen111.github.io/UniVidX.gith
 
 ## See it move — `R2AIN` intrinsic decomposition
 
-A 21-frame portrait clip in. Three physically-grounded decompositions out, plus a clean normal map — all from one ComfyUI graph. FP8 prequantized DiT, **11.61 minutes** wall on an RTX 5090 *(20 steps · cfg 5.0 · seed 42 · the production preset)*.
+The first 21 contiguous frames of a 24 fps portrait clip in (~0.87 sec of real motion). Three physically-grounded decompositions out, plus a clean normal map — all from one ComfyUI graph. FP8 prequantized DiT, **9.52 minutes** wall on an RTX 5090 *(20 steps · cfg 5.0 · seed 42 · the production preset)*. GIFs play back at the native 24 fps.
 
 <table>
   <tr>

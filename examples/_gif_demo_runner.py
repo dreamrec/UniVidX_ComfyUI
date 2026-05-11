@@ -62,7 +62,7 @@ WORKFLOW = {
             "custom_height": 480,
             "frame_load_cap": 21,
             "skip_first_frames": 0,
-            "select_every_nth": 23,  # spread 21 picks over the full LTX clip
+            "select_every_nth": 1,   # contiguous frames — natural motion, no jump-cuts
             "format": "Wan",
         },
     },
@@ -113,19 +113,19 @@ WORKFLOW = {
         "width": 480, "height": 360, "crop": "disabled"}},
     # GIF outputs - 12 fps × 21 frames = 1.75 s loop, infinite loop
     "21": {"class_type": "VHS_VideoCombine", "inputs": {
-        "images": ["11", 0], "frame_rate": 12, "loop_count": 0,
+        "images": ["11", 0], "frame_rate": 24, "loop_count": 0,
         "filename_prefix": "unividx_demo_rgb", "format": "image/gif",
         "pingpong": False, "save_output": True}},
     "22": {"class_type": "VHS_VideoCombine", "inputs": {
-        "images": ["12", 0], "frame_rate": 12, "loop_count": 0,
+        "images": ["12", 0], "frame_rate": 24, "loop_count": 0,
         "filename_prefix": "unividx_demo_albedo", "format": "image/gif",
         "pingpong": False, "save_output": True}},
     "23": {"class_type": "VHS_VideoCombine", "inputs": {
-        "images": ["13", 0], "frame_rate": 12, "loop_count": 0,
+        "images": ["13", 0], "frame_rate": 24, "loop_count": 0,
         "filename_prefix": "unividx_demo_irradiance", "format": "image/gif",
         "pingpong": False, "save_output": True}},
     "24": {"class_type": "VHS_VideoCombine", "inputs": {
-        "images": ["14", 0], "frame_rate": 12, "loop_count": 0,
+        "images": ["14", 0], "frame_rate": 24, "loop_count": 0,
         "filename_prefix": "unividx_demo_normal", "format": "image/gif",
         "pingpong": False, "save_output": True}},
 }
