@@ -1,19 +1,18 @@
-"""Tier B sanity check: confirm dit_weight_mode='fp8_prequantized' loads
-the FP8 substitution path live in the running ComfyUI process.
+"""FP8 prequantized smoke test — regression guard for the
+`dit_weight_mode='fp8_prequantized'` path.
 
-What this proves:
-- The new code (fp8_loader.py, runtime branch, loader widget) is in
-  sys.modules.
-- The Kijai FP8 file resolves on disk.
-- load_fp8_state_dict_into walks model.pipe.dit, descends through
-  PEFT wrappers, replaces ~400 base nn.Linear with FP8Linear, loads
-  the F32 aux tensors.
-- The expected log line "FP8 substitution complete: N Linears ->
-  FP8Linear, M aux loaded, K unmatched" fires.
-- A tiny sampling run produces output without erroring.
+What this verifies on a live ComfyUI instance:
+- The runtime quantize path runs end-to-end (`fp8_loader.py`,
+  `nodes/loader.py`, `src/runtime.py` all in `sys.modules`).
+- `_apply_fp8_substitution` walks model.pipe.dit, descends through
+  PEFT wrappers, replaces ~400 base nn.Linear with FP8Linear,
+  preserves LoRA adapters in BF16.
+- The expected INFO log "FP8 substitution complete: N Linears
+  quantized to FP8Linear (per-tensor scaled)" fires.
+- A tiny sampling run produces non-error output.
 
-Greps the live ComfyUI log file for the FP8 marker. Exits nonzero
-if the marker is missing or the run fails.
+Run after any change to fp8_loader.py / runtime._apply_fp8_substitution.
+Exits non-zero on missing log marker or failed sampling. Wall ~2-3 min.
 """
 from __future__ import annotations
 

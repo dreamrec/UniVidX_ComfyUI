@@ -1,14 +1,13 @@
-"""Tier A5 benchmark — measures `vram_buffer_gb` perf delta on the live
-ComfyUI server.
+"""vram_buffer_gb perf-delta bench on a live ComfyUI server.
 
-Queues the R2AIN_video_api.json workflow twice with `vram_buffer_gb=4.0`
-and `vram_buffer_gb=12.0` and reports wall + per-step time for each.
-Used to populate the README perf-table cell that 0.3.0-rc1 marks as
-"un-benched in this RC".
+Queues R2AIN_video_api.json twice with `vram_buffer_gb=4.0` and
+`vram_buffer_gb=12.0` (default sweep) and reports wall + per-step
+time for each. Produced the +65% delta number that landed in 0.3.0's
+perf-table row.
 
-Both runs go through the cache-miss path (distinct cache keys after the
-A2 fix), so each does a fresh cold load + 20 sample steps. The wall
-delta between runs isolates the effect of vram_buffer on the sample
+Both runs go through the cache-miss path (distinct cache keys after
+the 0.3.0 fix), so each does a fresh cold load + 20 sample steps.
+The wall delta isolates the effect of vram_buffer on the sample
 phase: lower buffer = more layers resident = faster sampling; higher
 buffer = more layers offloaded = slower sampling but more activation
 headroom.
@@ -19,9 +18,12 @@ Usage:
     python examples/_bench_vram_buffer.py --host 127.0.0.1 --port 8000
 
 Notes:
-    - Run AFTER a ComfyUI restart that picks up the 0.3.0-rc1 code.
-    - Expect ~14-15 min per condition on RTX 5090 (480x640 x21 frames x20 steps).
-    - Two conditions = ~30 min total. Three = ~45 min.
+    - Expect ~10-15 min per condition on RTX 5090 (480x640 x21 frames x20 steps,
+      no sage/compile/FP8).
+    - Two conditions = ~25 min total. Three = ~40 min.
+    - With dit_weight_mode='fp8_prequantized' (0.4.0+), the vram_buffer
+      knob becomes effectively a no-op because the FP8 DiT fits fully
+      resident — bench should show ~9-10 min wall regardless of value.
 """
 from __future__ import annotations
 

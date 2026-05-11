@@ -191,15 +191,13 @@ def test_dit_weight_mode_fp8_prequantized_works_without_external_file(
 
 def test_dit_weight_mode_fp8_prequantized_invokes_substitution(
         stub_runtime, monkeypatch):
-    """Happy path: when the FP8 file is on disk, load_model() calls
-    _apply_fp8_substitution to swap the DiT Linears with FP8Linear.
-    Mock the file-resolve + safetensors-load so this test doesn't
-    need a real 14 GB file."""
+    """Happy path: load_model() calls _apply_fp8_substitution
+    exactly once when dit_weight_mode='fp8_prequantized'. The
+    substitution itself is monkeypatched here; dispatch between
+    file-based and runtime-quantize paths is covered by the
+    test_apply_fp8_substitution_* tests below."""
     from src import runtime
     from nodes.loader import UniVidXLoader
-
-    monkeypatch.setattr(runtime, "_resolve_fp8_weights_path",
-                        lambda: "/fake/Wan2_1-T2V-14B_fp8_e4m3fn.safetensors")
 
     sub_calls: list[tuple] = []
 
@@ -215,6 +213,57 @@ def test_dit_weight_mode_fp8_prequantized_invokes_substitution(
         f"got calls={sub_calls}"
     )
     assert sub_calls[0][1] == "intrinsic"
+
+
+def test_apply_fp8_substitution_dispatches_to_runtime_quantize_when_no_file(
+        monkeypatch):
+    """Default 0.4.0 path: when the Kijai _scaled FP8 file is absent,
+    _apply_fp8_substitution falls back to quantize_dit_inplace."""
+    from src import runtime
+
+    monkeypatch.setattr(runtime, "_resolve_fp8_weights_path", lambda: None)
+
+    runtime_calls: list[str] = []
+    file_calls: list[str] = []
+    monkeypatch.setattr(
+        runtime, "_apply_fp8_substitution_runtime_quantize",
+        lambda model: runtime_calls.append("runtime"),
+    )
+    monkeypatch.setattr(
+        runtime, "_apply_fp8_substitution_from_file",
+        lambda model, p: file_calls.append(p),
+    )
+
+    runtime._apply_fp8_substitution(object(), "intrinsic")
+    assert runtime_calls == ["runtime"]
+    assert file_calls == []
+
+
+def test_apply_fp8_substitution_dispatches_to_file_when_scaled_file_present(
+        monkeypatch):
+    """Opt-in path: when _resolve_fp8_weights_path finds a Kijai
+    _scaled file on disk, _apply_fp8_substitution uses the
+    file-based loader instead of the runtime quantize."""
+    from src import runtime
+
+    fake_path = "/fake/Wan2_1-T2V-14B_fp8_e4m3fn_scaled.safetensors"
+    monkeypatch.setattr(runtime, "_resolve_fp8_weights_path",
+                        lambda: fake_path)
+
+    runtime_calls: list[str] = []
+    file_calls: list[str] = []
+    monkeypatch.setattr(
+        runtime, "_apply_fp8_substitution_runtime_quantize",
+        lambda model: runtime_calls.append("runtime"),
+    )
+    monkeypatch.setattr(
+        runtime, "_apply_fp8_substitution_from_file",
+        lambda model, p: file_calls.append(p),
+    )
+
+    runtime._apply_fp8_substitution(object(), "intrinsic")
+    assert runtime_calls == []
+    assert file_calls == [fake_path]
 
 
 def test_dit_weight_mode_bf16_shards_overrides_legacy_fp8_dtype(

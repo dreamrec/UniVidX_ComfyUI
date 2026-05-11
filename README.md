@@ -72,10 +72,33 @@ All numbers measured on RTX 5090 (32 GB), R2AIN @ 480×640×21 frames, video-con
 
 | Preset | Loader settings | Sampler settings | Wall time | Use for |
 |---|---|---|---|---|
-| **PRODUCTION** | `prefer_sage_attn=True` *(or `compile_dit=True`, pick one)* | `num_inference_steps=20`, `cfg_scale=5.0` | **~14.5 min** | Final renders |
+| **PRODUCTION** | `prefer_sage_attn=True` *(or `compile_dit=True`, pick one)* | `num_inference_steps=20`, `cfg_scale=5.0` | **~14.5 min** ⚠️ | Final renders |
 | **PREVIEW** | `prefer_sage_attn=True` | `num_inference_steps=4`, `cfg_scale=1.0` | **~1.4 min** *(13× faster)* | Iterating on RGB-conditioned modes (`R2AIN`, `R2PFB`) — DO NOT use for text-only modes |
+| **FP8 PRODUCTION** *(new in 0.4.0)* | `dit_weight_mode=fp8_prequantized` | `num_inference_steps=20`, `cfg_scale=5.0` | **9.43 min** *(measured)* | Final renders on memory-constrained cards (~14 GB DiT VRAM) — strictly better than PRODUCTION on this hardware |
+
+⚠️ The PRODUCTION row's "~14.5 min" was measured pre-0.3.0 and is being re-benched as part of the 0.4.0 close-out — Tier-B's no-sage BF16 baseline measured 10.85 min on the same workflow, which is inconsistent with `prefer_sage_attn=True` shaving "–18%" wall. See [`ROADMAP.md`](ROADMAP.md) → "Close 0.4.0 final."
 
 The PREVIEW preset gives marginally softer detail (tie stripe, facial geometry) but all decompositions remain physically correct on this content. Validate per content type if you have high-motion clips.
+
+## Using FP8 (new in 0.4.0)
+
+On a 32 GB card the simplest performance + memory win is:
+
+```
+UniVidXLoader
+  variant            = intrinsic   (or alpha)
+  dtype              = bfloat16
+  dit_weight_mode    = fp8_prequantized   ← the new knob
+  vram_buffer_gb     = 4.0
+  prefer_sage_attn   = False
+  compile_dit        = False
+```
+
+That gives ~14 GB DiT residency (vs ~28 GB BF16) and ~9.4 min wall on the R2AIN_video_api.json workflow at production scale. Quality: PSNR vs BF16 measured at 30.89 dB (albedo), 39.17 dB (irradiance), 36.28 dB (normal), exact match on RGB-conditioned slots. See CHANGELOG `0.4.0-rc1` for the full benchmark.
+
+How it works: after UniVidX's standard BF16 cold-load, the loader walks the DiT, computes per-tensor absmax scales for each Linear layer, casts the weight tensors to `torch.float8_e4m3fn`, and replaces each Linear with an `FP8Linear` that dequantizes on forward. UniVidX's per-modality LoRA adapters (the four `lora_A/B_<mod>` pairs at each attention block) are preserved at BF16 by walking through PEFT wrappers and replacing only the inner base layer. No external file needed — when a Kijai `Wan2_1-T2V-14B_fp8_e4m3fn_scaled.safetensors` lands upstream and is dropped into `models/diffusion_models/`, the loader will use it directly instead of runtime-quantizing.
+
+Stacking compatibility with `prefer_sage_attn` / `compile_dit` is being validated as part of 0.4.0 close-out.
 
 ## Optimization knobs (Loader)
 
@@ -125,7 +148,7 @@ Five nodes, all under the `UniVidX` category. Custom socket types — `UNIVIDX_M
 
 </td><td>
 
-**`UniVidXLoader`** — Loads `intrinsic` or `alpha` variant, exposes the perf knobs (`compile_dit`, `prefer_sage_attn`, `dtype`, `vram_buffer_gb`). Models are cached per `(variant, ckpt, device, dtype, vram_buffer, fp8_qtype, compile_dit, prefer_sage_attn)` so toggling any of them triggers a clean re-load. `vram_buffer_gb` is in the key as of 0.3.0 because it now actually controls VRAM management (was a no-op in 0.1.0–0.2.1).
+**`UniVidXLoader`** — Loads `intrinsic` or `alpha` variant, exposes the perf knobs (`compile_dit`, `prefer_sage_attn`, `dtype`, `vram_buffer_gb`, `dit_weight_mode`). Models are cached per `(variant, ckpt, device, dtype, vram_buffer, fp8_qtype, compile_dit, prefer_sage_attn, dit_weight_mode)` so toggling any of them triggers a clean re-load. `vram_buffer_gb` is in the key as of 0.3.0 because it now actually controls VRAM management (was a no-op in 0.1.0–0.2.1). `dit_weight_mode` is in the key as of 0.4.0 — picking `fp8_prequantized` drops DiT steady-state VRAM ~50% (with -13% wall as a bonus); see the perf table below.
 
 </td></tr>
 <tr><td>
