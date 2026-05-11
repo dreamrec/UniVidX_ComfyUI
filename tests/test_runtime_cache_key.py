@@ -165,6 +165,46 @@ def test_load_model_cache_hit_same_vram_buffer(stub_runtime):
     assert _FakeUniVidModel.instance_count == 1
 
 
+def test_cache_evicts_oldest_when_capacity_exceeded(stub_runtime):
+    """LRU eviction guard: the model cache must not grow unbounded.
+    Loading more distinct cache keys than the capacity should evict
+    the oldest entries so subsequent loads cold-load fresh — keeps a
+    multi-condition bench (or a graph that toggles dit_weight_mode
+    repeatedly) from ballooning into N×28 GB host RAM."""
+    from src import runtime
+    from src.runtime import load_model
+
+    # Force capacity to 2 for the test (matches the production default).
+    runtime._MODEL_CACHE_MAX_SIZE = 2
+
+    a = load_model("intrinsic", vram_buffer=4.0)
+    b = load_model("intrinsic", vram_buffer=8.0)
+    c = load_model("intrinsic", vram_buffer=12.0)   # evicts `a`
+    # Cache should now hold {b's key, c's key}; `a`'s key is gone.
+    assert len(runtime._MODEL_CACHE) == 2
+    # Loading `a` again should produce a NEW instance (cache miss).
+    a2 = load_model("intrinsic", vram_buffer=4.0)
+    assert a is not a2, "a should have been evicted; loading it again must cold-load"
+    # Three distinct models cached so far... wait, after a2 cache holds
+    # {c, a2}, having evicted b. So load_model("intrinsic", 8.0) is
+    # another miss.
+    b2 = load_model("intrinsic", vram_buffer=8.0)
+    assert b is not b2
+
+
+def test_clear_cache_drops_all_entries(stub_runtime):
+    """The explicit clear_cache() helper must drop every entry so a
+    bench driver can force a clean state between conditions."""
+    from src import runtime
+    from src.runtime import load_model, clear_cache
+
+    load_model("intrinsic", vram_buffer=4.0)
+    load_model("intrinsic", vram_buffer=8.0)
+    assert len(runtime._MODEL_CACHE) == 2
+    clear_cache()
+    assert len(runtime._MODEL_CACHE) == 0
+
+
 def test_load_model_cache_miss_different_vram_buffer(stub_runtime):
     """Distinct vram_buffer values must produce distinct cache entries.
     Otherwise two loader nodes with different vram_buffer_gb settings

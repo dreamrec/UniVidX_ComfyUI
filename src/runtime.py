@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 # Fail fast on stale ComfyUI installs that drop this folder into a
@@ -40,7 +41,19 @@ _PLUGIN_ROOT = _THIS_DIR.parent  # custom_nodes/UniVidX_ComfyUI/
 _UNIVIDX_ROOT = _PLUGIN_ROOT / "vendor" / "UniVidX"
 
 _LOAD_LOCK = threading.Lock()
-_MODEL_CACHE: dict = {}
+
+# LRU-bounded model cache. Each entry is ~14 GB FP8 or ~28 GB BF16
+# in steady-state VRAM + host RAM, so growing this dict unbounded is
+# how a multi-condition bench can thrash a 32 GB card. Default cap of
+# 2 covers the common cases (single-loader graphs + two-loader graphs
+# with different settings) and forces an LRU eviction on the third
+# distinct cache key.
+#
+# Settable via the UNIVIDX_MODEL_CACHE_MAX env var for advanced users
+# running headless validation matrices on cards with more VRAM. Tests
+# rewrite _MODEL_CACHE_MAX_SIZE directly.
+_MODEL_CACHE: "OrderedDict" = OrderedDict()
+_MODEL_CACHE_MAX_SIZE: int = int(os.environ.get("UNIVIDX_MODEL_CACHE_MAX", "2"))
 
 
 def _comfy_root() -> str:
@@ -120,7 +133,28 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
 
     with _LOAD_LOCK:
         if cache_key in _MODEL_CACHE:
+            # Touch the entry so it becomes most-recently-used.
+            _MODEL_CACHE.move_to_end(cache_key)
             return _MODEL_CACHE[cache_key]
+
+        # Cache miss. Evict LRU entries BEFORE constructing the new
+        # model so we never have two big models in VRAM simultaneously
+        # (peak host RAM during cold-load is ~28 GB; doubling that
+        # OOMs on a 32 GB card with anything else resident).
+        while len(_MODEL_CACHE) >= max(1, _MODEL_CACHE_MAX_SIZE):
+            evicted_key, evicted_model = _MODEL_CACHE.popitem(last=False)
+            _log.info(
+                "Evicting LRU model cache entry (variant=%s, "
+                "dit_weight_mode=%s, vram_buffer=%s) to stay within "
+                "UNIVIDX_MODEL_CACHE_MAX=%d",
+                evicted_key[0], evicted_key[-1], evicted_key[4],
+                _MODEL_CACHE_MAX_SIZE,
+            )
+            del evicted_model
+            import gc as _gc
+            _gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         initialize()
 
