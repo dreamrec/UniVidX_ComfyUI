@@ -6,9 +6,49 @@
 ![License](https://img.shields.io/badge/license-GPL--3.0-2f855a)
 ![PyTorch](https://img.shields.io/badge/torch-%E2%89%A52.7%2Bcu128-ee4c2c)
 ![Nodes](https://img.shields.io/badge/nodes-5-f59e0b)
-![Tests](https://img.shields.io/badge/tests-39%20unit%20%2B%2010%20integration-success)
+![Tests](https://img.shields.io/badge/tests-85%20unit%20%2B%2010%20integration-success)
+![GPU](https://img.shields.io/badge/GPU-%E2%89%A532%20GB%20VRAM%20%7C%20RTX%205090%20validated-blueviolet)
 
 ComfyUI custom nodes for [UniVidX](https://houyuanchen111.github.io/UniVidX.github.io/) (SIGGRAPH 2026): unified video diffusion that decomposes a clip into **RGB / Albedo / Irradiance / Normal** (intrinsic) or **Composite RGB / Alpha matte / Foreground / Background** (alpha). 30 task modes across two model variants, all driven from a single five-node graph.
+
+> ## ⚠️ Hardware requirements (read this first)
+>
+> This is a **14-billion-parameter video diffusion model** running locally. It is **not lightweight**. Verify your system can handle it before installing.
+>
+> **Minimum to run at all:**
+>
+> | Resource | Requirement |
+> |---|---|
+> | **GPU VRAM** | **≥ 24 GB** with the 0.5.0 FP8 path; **≥ 32 GB** for the BF16 baseline |
+> | **GPU architecture** | CUDA compute capability **8.0+** (Ampere / RTX 3000+, Ada / RTX 4000+, Hopper / H100, Blackwell / RTX 5000+) |
+> | **System RAM** | **≥ 32 GB** (peak ~28 GB during cold-load of the BF16 DiT shards); 64+ GB comfortable |
+> | **Disk** | **~85 GB free** (Wan2.1-T2V-14B 69 GB + UniVidX 1.6 GB + optional LightX2V 0.6 GB + working space) |
+> | **PyTorch** | **≥ 2.7 with CUDA 12.8** (older torch errors on Blackwell GPUs with `no kernel image is available`) |
+> | **Python** | **3.10+** (tested on 3.12.9) |
+> | **ComfyUI** | **0.20+** |
+>
+> **Validated configuration (all benchmarks in this README):** RTX 5090 (32 GB Blackwell sm_120), Windows 11, Python 3.12.9, PyTorch 2.7.0+cu128, ComfyUI Desktop 0.20.1.
+>
+> **Card-by-card honest read:**
+>
+> | GPU | Status | Notes |
+> |---|---|---|
+> | **RTX 5090** (32 GB Blackwell) | ✅ **Validated** | The benchmark target. FP8 path: 9.43 min/chunk; preview: 4.59 min/chunk. |
+> | **RTX 4090** (24 GB Ada, FP8 native) | 🟢 **Should work; not validated by us** | FP8 path fits cleanly (~14 GB DiT + activations). BF16 path tight but possible with `vram_buffer_gb=8+`. Expect ~10-15% slower than 5090 due to memory bandwidth. |
+> | **RTX 6000 Ada / A6000** (48 GB Ada) | 🟢 **Should work** | Plenty of headroom for both paths. Could batch 2-3 clips in parallel with custom orchestration. |
+> | **RTX 6000 Pro Blackwell** (96 GB) | 🟢 **Should work, ideal for batch** | Sweet spot if you process many clips per day. Same per-clip speed as 5090; massive parallelism headroom. |
+> | **H100 / H200 / B200** (80-192 GB datacenter) | 🟢 **Should work, overkill for inference** | Same per-clip speed as Blackwell consumer. Worth the cost only if you're also fine-tuning. |
+> | **RTX 3090 / 3090 Ti** (24 GB Ampere, no native FP8) | 🟡 **Should work, slower** | FP8 path runs via software cast (no Blackwell tensor-core FP8). Memory fits; per-step ~20-30% slower than 4090. |
+> | **RTX 4080 / 5080** (16 GB) | 🔴 **Will OOM** | FP8 DiT alone is ~14 GB. Add activations + VAE + text encoder → exceeds 16 GB at production resolution. |
+> | **RTX 3080 / 4070 / 4060 Ti** (12 GB) | ❌ **Cannot run** | Insufficient VRAM even with aggressive layer streaming. |
+> | **Pre-Ampere** (RTX 20-series, V100, P100, etc.) | ❌ **Cannot run** | CUDA compute capability < 8.0. Wan2.1's Flash-Attention-2 path needs sm_80+. |
+>
+> **Cloud option:** if you don't have local hardware, **rent an L40 (48 GB) or RTX 6000 (48 GB) instance** from RunPod / Vast.ai / Lambda Labs — they're typically $0.50-1.00/hour and a single 1-min clip via the chunked sampler (FP8 preview, ~4.4 hr) runs for ~$3-5 of compute.
+>
+> **Per-clip wall times** (RTX 5090 reference; all measured):
+> - One 21-frame chunk @ 480×640: **~9.43 min** (production FP8) or **~4.59 min** (fast preview FP8+distill)
+> - 1-minute @ 24 fps clip via chunked sampler: **~14 hours** (production) or **~4.4 hours** (preview)
+> - This is **not real-time**. Plan workflows around overnight / multi-hour processing.
 
 **What you'd use it for:** relighting (swap the irradiance channel, recombine), VFX alpha pulls without a green screen (a clean matte from any clip), 3D reconstruction pipelines that need normals + albedo as conditioning, ControlNet-style guidance for *other* video models that consume normal maps.
 
@@ -293,14 +333,61 @@ Full v0.3 execution plan in [`ROADMAP_v0.3.md`](ROADMAP_v0.3.md). Summary of pri
   7. **Validate** with the tiny R2AIN/R2PFB workflows first, then benchmark BF16 vs FP8 on cold-load time, peak VRAM, per-step time, and output sanity (per-modality SSIM/PSNR vs the BF16 reference).
 - **Step-distill LoRA stacking** — try [LightX2V's `Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors`](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v) on top of UniVidX's per-modality LoRA. Could close the small quality gap of the PREVIEW 4-step preset. Needs PEFT compatibility verification with UniVidX's `add_multiple_loras_to_model` machinery.
 
-## Requirements
+## Requirements (detailed)
 
-- ComfyUI 0.20+ on Python 3.10+ (tested on 3.12.9)
-- PyTorch ≥ 2.7 with CUDA 12.8 (Blackwell needs cu128 — older torch errors with `no kernel image is available for execution on the device.`)
-- ≥24 GB VRAM (32 GB recommended for headroom)
-- ~83 GB free disk for the model packs
-- 16+ GB host RAM
-- DiffSynth-Studio + mmgp + transformers ≥ 4.38 (auto-installed via `requirements.txt`)
+The summary table at the top of this README covers the "can I run this?" question. The detail below is for users who want to know exactly why each requirement matters.
+
+### Software
+
+| Dependency | Version | Why |
+|---|---|---|
+| **Python** | 3.10+ (tested 3.12.9) | UniVidX uses Python 3.10's `str \| None` PEP-604 union syntax. The runtime explicitly fails fast on older Pythons. |
+| **PyTorch** | ≥ 2.7 with CUDA 12.8 | Blackwell sm_120 (RTX 5090) requires `cu128`. Older PyTorch builds error with `no kernel image is available for execution on the device.` `torch.float8_e4m3fn` (used by the 0.4.0+ FP8 path) needs PyTorch 2.1+. |
+| **ComfyUI** | 0.20+ | The node-registration API and the `INPUT_TYPES` schema we ship target this version's frontend. Older versions may render widgets incorrectly. |
+| **DiffSynth-Studio** | ≥ 2.0 | UniVidX wraps DiffSynth's `WanVideoPipeline`. The pipeline-level VRAM management and tokenizer config use DiffSynth 2.x APIs. Auto-installed via `requirements.txt`. |
+| **mmgp** | latest | Provides the read-only memory-mapped safetensors loader that prevents the Windows paging-file commit blowup when six 9.84 GB DiT shards are mapped concurrently. |
+| **PEFT** | ≥ 0.10 | UniVidX uses `peft.inject_adapter_in_model` for the four per-modality LoRA adapters. The FP8 substitution and step-distill merge both descend through PEFT wrappers. |
+| **safetensors** | ≥ 0.4 | All model weights ship as safetensors; the FP8 and step-distill loaders read them via `safetensors.safe_open`. |
+
+### GPU
+
+The binding constraint is **VRAM**. The Wan2.1-T2V-14B base model is ~28 GB in BF16 and ~14 GB in FP8. On top of that you need ~4-6 GB for activations / KV cache / VAE decode / text encoder during sampling.
+
+| Path | DiT footprint | Total VRAM during sampling | Min card |
+|---|---|---|---|
+| BF16 baseline | ~28 GB | ~32-34 GB | 32 GB+ |
+| **FP8 prequantized (0.5.0 default)** | **~14 GB** | **~18-20 GB** | **24 GB+** |
+| FP8 + step-distill (fast preview) | ~14 GB | ~18-20 GB | 24 GB+ |
+
+**CUDA compute capability**: 8.0 or higher (Ampere generation onward). UniVidX's attention path uses Flash-Attention-2's pattern which requires sm_80+. SageAttention 1.x (optional) supports head_dim ∈ {64, 96, 128} and is Hopper/Ada tuned; SageAttention 2.x from [woct0rdho's prebuilt wheels](https://github.com/woct0rdho/SageAttention/releases) covers Blackwell. As of 0.5.0, neither sage nor compile_dit help on the FP8 path — leave them off (see the full perf matrix above).
+
+### System RAM
+
+Peak host RAM during a cold-load:
+- BF16 path: ~28 GB peak (loading the six DiT shards before VRAM management kicks in)
+- FP8 path: ~28 GB peak (same cold-load; FP8 quantization runs after on the loaded BF16 weights)
+
+64 GB system RAM gives comfortable headroom for ComfyUI + browser + other applications during the load. 32 GB is the practical minimum; the OS swaps to page file under stress on smaller systems.
+
+### Disk
+
+| Pack | Size | Required? |
+|---|---|---|
+| [Wan-AI/Wan2.1-T2V-14B](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B) | ~69 GB | Yes — the base text-to-video DiT |
+| [houyuanchen/UniVidX](https://huggingface.co/houyuanchen/UniVidX) | ~1.6 GB | Yes — the per-modality LoRA adapters (intrinsic + alpha) |
+| [LightX2V step-distill](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v) (rank-64 LoRA only) | ~600 MB | Optional — enables the 0.5.0 fast-preview mode |
+| [Kijai `_scaled` Wan2.1 FP8](https://huggingface.co/Kijai/WanVideo_comfy) (if/when it lands) | ~14 GB | Optional — auto-engages the file-based FP8 loader instead of runtime quantize |
+
+Plan for **85 GB** of disk including the optional packs + working space for output PNGs and MP4s (a 1-min clip at 480×640×24fps × 4 modalities is ~500 MB of intermediate PNGs).
+
+### Operating system
+
+| OS | Status |
+|---|---|
+| Windows 11 (validated) | ✅ All three Windows-specific patches (JSON path escaping, mmgp readonly mmap, junctions instead of symlinks) ship enabled |
+| Windows 10 | 🟢 Should work, untested |
+| Linux | 🟢 Should work; the Windows-specific patches no-op gracefully |
+| macOS | 🔴 Not viable; no CUDA support for the Wan2.1 + FP8 path |
 
 ## Windows-specific patches
 
