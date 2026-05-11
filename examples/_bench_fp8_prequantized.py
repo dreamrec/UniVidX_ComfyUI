@@ -176,6 +176,7 @@ def main() -> int:
         "irradiance": 30.0,
         "normal": 30.0,
     }
+    # ASCII-only verdict strings so Windows cp1252 console doesn't choke.
     results = []
     for modality in ("placeholder", "albedo", "irradiance", "normal"):
         r = compare_modality(modality, ref_tag, fp8_tag)
@@ -199,7 +200,7 @@ def main() -> int:
             verdict = "SKIP (no frames)"
             fail_count += 1
         elif r["psnr_db"] >= thr:
-            verdict = f"PASS (≥ {thr:.0f} dB)"
+            verdict = f"PASS (>= {thr:.0f} dB)"
             pass_count += 1
         else:
             verdict = f"FAIL (< {thr:.0f} dB)"

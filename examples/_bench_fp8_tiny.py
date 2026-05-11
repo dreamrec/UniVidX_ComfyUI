@@ -123,7 +123,7 @@ def main() -> int:
     fail = 0
     for mod, p in results.items():
         thr = 35.0 if mod == "rgb" else 30.0
-        verdict = (f"PASS (≥ {thr:.0f} dB)" if (p == float("inf") or p >= thr)
+        verdict = (f"PASS (>= {thr:.0f} dB)" if (p == float("inf") or p >= thr)
                    else f"FAIL (< {thr:.0f} dB)")
         if "FAIL" in verdict:
             fail += 1

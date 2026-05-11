@@ -1,5 +1,126 @@
 # Changelog
 
+## 0.4.0-rc1 — 2026-05-11
+
+**Tier B Phase 1 ships: FP8 e4m3fn DiT runtime quantization.** The
+`dit_weight_mode='fp8_prequantized'` loader option converts the DiT's
+~400 nn.Linear modules to FP8 storage with per-tensor absmax scaling
+after the BF16 cold-load, producing **~50% lower steady-state VRAM
+AND ~13% faster wall time** at the same time — no per-modality
+quality regression at production step counts. PEFT-aware: LoRA
+adapters stay BF16 (the B5 contract).
+
+### Headline measurements (RTX 5090, R2AIN_video @ 480x640x21x20, no sage/compile)
+
+| Path | Wall (server) | DiT VRAM steady-state |
+|---|---|---|
+| `bf16_shards` (baseline) | 10.85 min | ~28 GB (with `vram_buffer=4` streaming) |
+| `fp8_prequantized` (new)  | **9.43 min** (-1.42 min, -13.1%) | **~14 GB resident** |
+
+### Per-modality PSNR (FP8 vs BF16 @ same seed, same prompt, 21 frames)
+
+| Modality | PSNR (dB) | max-diff | mean-diff | Threshold | Verdict |
+|---|---|---|---|---|---|
+| placeholder (RGB output slot) | inf | 0.0000 | 0.0000 | >= 30 | PASS (exact) |
+| albedo  | 30.89 | 0.3529 | 0.0246 | >= 30 | PASS |
+| irradiance | 39.17 | 0.2392 | 0.0073 | >= 30 | PASS |
+| normal  | 36.28 | 0.5333 | 0.0091 | >= 30 | PASS |
+
+### How it works
+
+1. UniVidX's BF16 cold-load happens unchanged (`WanVideoPipeline.from_pretrained`
+   loads the six BF16 shards into the DiT; per-modality PEFT adapters
+   wire in).
+2. `_apply_fp8_substitution(model, variant)` runs after `enable_vram_management`
+   and calls `quantize_dit_inplace(model.pipe.dit)` (src/fp8_loader.py:200+).
+3. The quantizer walks the DiT recursively. For each `nn.Linear` (or
+   PEFT-wrapped Linear at `.base_layer`), it computes
+   `scale = max(|w|, 1e-12) / 448` from the BF16 weight, casts
+   `(w/scale).to(float8_e4m3fn)`, and replaces the module with an
+   `FP8Linear` carrying the FP8 weight + scale buffer + bias.
+4. `FP8Linear.forward` dequantizes on the hot path:
+   `F.linear(x, weight.to(x.dtype) * scale_weight.to(x.dtype), bias.to(x.dtype))`.
+   The dequant cost is hidden behind the matmul; per-step throughput
+   matches BF16 baseline. The wall-speedup vs `bf16_shards` comes
+   from avoiding `enable_vram_management`'s layer streaming because
+   the smaller FP8 DiT fits fully resident in VRAM.
+
+### Why not Kijai's pre-quantized file (history note)
+
+ROADMAP_v0.3.md's Tier B1-B3 envisioned loading
+`Kijai/WanVideo_comfy/Wan2_1-T2V-14B_fp8_e4m3fn.safetensors` directly
+(see commit [`df31feb`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/df31feb) +
+[`f15b788`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/f15b788)).
+Tiny-scale PSNR on that file produced 21-31 dB across modalities —
+below threshold. Root cause: Kijai's Wan2.1 file is a bare BF16->FP8
+cast with no per-tensor scale tensors (the `_scaled` variant ships
+for Wan2.2 but NOT Wan2.1 on `Kijai/WanVideo_comfy` as of writing).
+The pivot in commit [`e2b25c7`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/e2b25c7) skips the external file and computes
+per-tensor scales ourselves at load time from the BF16 cold-load
+weights — producing the same quality the upstream `_scaled` file
+would have offered, without depending on it. The file-based loader
+(`load_fp8_state_dict_into`) remains in `src/fp8_loader.py` for a
+future opt-in if Kijai ships a Wan2.1 `_scaled` variant or if a
+user wants to point at a custom scaled file.
+
+### Lesson learned: PSNR thresholds for diffusion outputs MUST be measured at production step counts
+
+Tiny-step (3 sampler steps) PSNR underestimated production-scale (20
+steps) PSNR by 5-10 dB across modalities for the *same* FP8
+implementation. Diffusion's iterative denoising is chaotic-amplification
+dominated at short step counts: tiny per-step numerical perturbations
+(FP8's ~6% per-element noise) propagate exponentially through the
+trajectory; the full schedule averages them out. The tiny benchmark
+remains useful as a smoke test (does sampling complete? is output
+non-trivial?) but the ship gate is production-scale.
+
+### Added
+
+- `src/fp8_loader.py` — `FP8Linear` module (FP8 weight storage,
+  per-tensor scaled dequant-on-forward) + `quantize_dit_inplace`
+  (runtime quantize from BF16 cold-load) + `load_fp8_state_dict_into`
+  + `triage_kijai_state_dict` (file-based path, retained for future
+  opt-in).
+- `nodes/loader.py` — new optional `dit_weight_mode` widget with
+  values `auto` / `bf16_shards` / `fp8_prequantized` /
+  `fp8_runtime_experimental`. `auto` preserves 0.3.x dtype-driven
+  behaviour; the explicit values pin the user's choice.
+- `examples/_audit_kijai_fp8.py` — safetensors structural probe used
+  for B1 (Kijai key conventions audit).
+- `examples/_sanity_fp8_prequantized.py` — one-shot tiny-workflow
+  sanity probe.
+- `examples/_bench_fp8_prequantized.py` — production-scale PSNR
+  harness used to produce the headline measurements above.
+- `examples/_bench_fp8_tiny.py` — tiny-scale PSNR harness (useful
+  as a smoke test; not the ship gate).
+- 12 new unit tests across `tests/test_fp8_loader.py` (FP8Linear
+  forward semantics, state-dict triage, PEFT descent, runtime
+  quantize) and `tests/test_loader_dit_weight_mode.py` (widget
+  contract, auto/explicit-mode routing, deprecation log, cache-key
+  contribution). 39 -> 58 unit tests, all passing.
+
+### Deferred
+
+- **Tier B7 (Phase 2 `_scaled_mm`)** — was originally planned to
+  unlock the per-step speedup. Phase 1's runtime quantize accidentally
+  delivered the speedup already (FP8 path is 13% faster than BF16,
+  not just smaller) because of `enable_vram_management` streaming
+  overhead in the BF16 path. Phase 2 remains as marginal polish for
+  a future release if profiling shows the FP8->BF16 dequant is the
+  bottleneck.
+- **Legacy `fp8_runtime_experimental` (mmgp.offload.quantize)** —
+  still routes from `dtype=fp8_e4m3fn`/`fp8_e5m2` for backward
+  compatibility but logs a deprecation warning. Will be removed in
+  0.5.0; `fp8_prequantized` is the supported path.
+
+### Pyproject
+
+- Version: 0.3.0 -> 0.4.0-rc1. Tagged as rc1 pending the user's
+  sign-off on the README + this CHANGELOG; final 0.4.0 once you
+  confirm the framing.
+
+---
+
 ## 0.3.0 — 2026-05-11
 
 Tier-A correctness fixes from `ROADMAP_v0.3.md`, **with the roadmap's root-cause diagnosis corrected mid-flight** (see "Diagnosis correction" below). The headline number from Tier A5: **`vram_buffer_gb` 4.0 vs 12.0 is +65% wall** (10.36 min → 17.10 min on baseline R2AIN_video, RTX 5090, no sage/compile) — making it the single biggest perf knob in the system, not the "deprecated" one 0.2.1 docs claimed.
