@@ -1,15 +1,40 @@
 {
   "id": "unividx_x_t2rain_->_4_mp4_videos",
   "revision": 0,
-  "last_node_id": 8,
+  "last_node_id": 9,
   "last_link_id": 7,
   "nodes": [
+    {
+      "id": 9,
+      "type": "Note",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        1100,
+        260
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "**UniVidX  ·  t2RAIN → 4× MP4 export**\n\nSame graph as t2RAIN_basic but each SaveImage is swapped for VHS_VideoCombine, so\nyou get 4 MP4 files per run instead of 84 PNGs. Useful for direct delivery into\nvideo-editing software, AfterEffects, etc.\n\n**Requires:** ComfyUI-VideoHelperSuite (provides VHS_VideoCombine).\n\n**0.5.0 defaults wired in:**\n  • Loader: `dit_weight_mode = fp8_prequantized`\n  • Sampler: 20 steps, cfg=5.0, seed=42\n  • Each VHS_VideoCombine writes h264 at the source frame rate.\n\n**Expected wall on RTX 5090:** ~9-10 min  (one full t2RAIN run + ~5 s per modality MP4 encode)\n\nThe output MP4s land in `ComfyUI/output/` named `unividx_t2RAIN_<modality>_*.mp4`.\n"
+      ],
+      "color": "#3a4a6c",
+      "bgcolor": "#222a44"
+    },
     {
       "id": 1,
       "type": "UniVidXLoader",
       "pos": [
         80,
-        120
+        380
       ],
       "size": [
         320,
@@ -48,7 +73,7 @@
       "type": "UniVidXTaskMode",
       "pos": [
         80,
-        330
+        590
       ],
       "size": [
         320,
@@ -80,7 +105,7 @@
       "type": "UniVidXSampler",
       "pos": [
         560,
-        120
+        380
       ],
       "size": [
         420,
@@ -168,7 +193,7 @@
       "type": "UniVidXDecodeIntrinsic",
       "pos": [
         1140,
-        120
+        380
       ],
       "size": [
         280,
@@ -228,7 +253,7 @@
       "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        120
+        380
       ],
       "size": [
         380,
@@ -282,7 +307,7 @@
       "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        700
+        960
       ],
       "size": [
         380,
@@ -336,7 +361,7 @@
       "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        1280
+        1540
       ],
       "size": [
         380,
@@ -390,7 +415,7 @@
       "type": "VHS_VideoCombine",
       "pos": [
         1580,
-        1860
+        2120
       ],
       "size": [
         380,
@@ -503,7 +528,7 @@
       "title": "Model Setup",
       "bounding": [
         40,
-        60,
+        320,
         400,
         390
       ],
@@ -515,7 +540,7 @@
       "title": "Sampling",
       "bounding": [
         520,
-        60,
+        320,
         500,
         820
       ],
@@ -527,7 +552,7 @@
       "title": "Decode (Intrinsic)",
       "bounding": [
         1100,
-        60,
+        320,
         360,
         250
       ],
@@ -539,7 +564,7 @@
       "title": "Video Outputs (4 MP4s)",
       "bounding": [
         1540,
-        60,
+        320,
         460,
         2320
       ],

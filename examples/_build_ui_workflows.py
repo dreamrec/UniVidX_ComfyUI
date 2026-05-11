@@ -47,7 +47,13 @@ GROUP_PAD_TOP        = 60   # title bar space
 GROUP_PAD_BOTTOM     = 40
 
 CANVAS_ORIGIN_X = 40        # left margin of leftmost group on canvas
-CANVAS_ORIGIN_Y = 60        # top margin of topmost group on canvas
+CANVAS_ORIGIN_Y = 320       # top margin of topmost group on canvas
+                            # (extra vertical room reserved for the
+                            # workflow-description Note node that
+                            # sits above the group row)
+NOTE_POS_X = 40             # top-left of the descriptive Note node
+NOTE_POS_Y = 40
+NOTE_SIZE  = (1100, 260)    # generous to fit the full description
 
 
 # Color palette (hex codes ComfyUI's group "color" field accepts).
@@ -310,6 +316,30 @@ class GroupSpec:
     spec: list[tuple[str, str, list, dict]]  # [(node_type, internal_id, widgets, schema_overrides)]
 
 
+def make_note_dict(text: str, node_id: int, order: int,
+                    pos: tuple[int, int] = (NOTE_POS_X, NOTE_POS_Y),
+                    size: tuple[int, int] = NOTE_SIZE,
+                    bgcolor: str = "#222a44") -> dict:
+    """Render a ComfyUI built-in Note node — the yellow markdown sticky
+    box used to annotate workflows. Free-floating (not in any group).
+    Skipped by the UI-to-API converter."""
+    return {
+        "id": node_id,
+        "type": "Note",
+        "pos": list(pos),
+        "size": list(size),
+        "flags": {},
+        "order": order,
+        "mode": 0,
+        "inputs": [],
+        "outputs": [],
+        "properties": {"Node name for S&R": "Note"},
+        "widgets_values": [text],
+        "color": "#3a4a6c",
+        "bgcolor": bgcolor,
+    }
+
+
 def make_node(ntype: str, iid: str, widgets: list, _schema_overrides: dict | None = None
               ) -> tuple[str, str, list, dict]:
     schema = NODE_SCHEMA[ntype]
@@ -374,6 +404,31 @@ def sampler_widgets(prompt: str = PROMPT, neg: str = NEG_PROMPT,
 # Workflow definitions — one function per demo.
 # ---------------------------------------------------------------------------
 
+NOTE_T2RAIN_BASIC = """\
+**UniVidX  ·  t2RAIN  ·  text → RGB / Albedo / Irradiance / Normal**
+
+Decomposes a 21-frame text-conditioned clip at 480×640 into the four intrinsic
+channels. The model is Wan2.1-T2V-14B with UniVidX's per-modality PEFT adapters.
+
+**0.5.0 defaults wired in:**
+  • Loader: `dit_weight_mode = fp8_prequantized`   (≈14 GB DiT, fully resident on a 32 GB card)
+  • Sampler: `num_inference_steps = 20`,  `cfg_scale = 5.0`,  `seed = 42`
+
+**Expected wall on RTX 5090:** ~9-10 min  (first run +2-3 min for cold-load / FP8 quantize walk)
+
+**Switch to BF16 baseline:** flip loader → `dit_weight_mode = bf16_shards`   (+13% wall, identical pixel-for-pixel to 0.3.x)
+
+**Switch to fast preview (~5 min):**
+    Loader  → `step_distill_lora = lightx2v`,  `step_distill_strength = 1.0`
+    Sampler → `num_inference_steps = 4`,  `cfg_scale = 1.0`
+    Quality: ~22-26 dB PSNR vs production (visibly different but plausible decompositions).
+    Requires the LightX2V LoRA under `models/loras/lightx2v/` — see examples/README.md.
+
+**Known model limit (this workflow):** text-only conditioning produces general results;
+for clean, content-specific decompositions feed an RGB video clip via R2AIN_video_api.json.
+"""
+
+
 def workflow_t2RAIN_basic() -> dict:
     setup = GroupSpec("Model Setup", COLOR_SETUP, [
         # widget order in INPUT_TYPES: variant, dtype, compile_dit,
@@ -411,7 +466,31 @@ def workflow_t2RAIN_basic() -> dict:
     ])
     validate_no_overlap(nodes, placed_groups)
     return finalize(nodes, placed_groups, links,
-                    name="UniVidX • t2RAIN (text -> RGB/A/I/N)")
+                    name="UniVidX • t2RAIN (text -> RGB/A/I/N)",
+                    note_text=NOTE_T2RAIN_BASIC)
+
+
+NOTE_T2RPFB_BASIC = """\
+**UniVidX  ·  t2RPFB  ·  text → Composite / Alpha / Foreground / Background**
+
+Alpha-family decomposition at 432×768 (alpha variant's trained resolution), 21 frames.
+
+**0.5.0 defaults wired in:**
+  • Loader: `variant = alpha`,  `dit_weight_mode = fp8_prequantized`
+  • Sampler: `num_inference_steps = 20`,  `cfg_scale = 5.0`,  `seed = 42`
+
+**Expected wall on RTX 5090:** ~10-12 min  (alpha variant is slightly slower than intrinsic)
+
+⚠️  **Known model limit:** text-only alpha decomposition produces near-uniform-white mattes
+(mean ≈ 255, std ≈ 1) because the model can't decide what's foreground from text alone.
+**For sharp, content-driven alpha mattes use R2PFB_video_api.json** and feed an RGB video clip
+— PSNR-validated production output, ~12.4 min wall.
+
+**Switch to BF16 baseline:** `dit_weight_mode = bf16_shards`.
+
+**Switch to fast preview:** `step_distill_lora = lightx2v` + 4 steps + cfg=1
+(quality framing same as t2RAIN — preview-grade, not production-grade).
+"""
 
 
 def workflow_t2RPFB_basic() -> dict:
@@ -447,7 +526,28 @@ def workflow_t2RPFB_basic() -> dict:
     ])
     validate_no_overlap(nodes, placed_groups)
     return finalize(nodes, placed_groups, links,
-                    name="UniVidX • t2RPFB (text -> R/P/F/B)")
+                    name="UniVidX • t2RPFB (text -> R/P/F/B)",
+                    note_text=NOTE_T2RPFB_BASIC)
+
+
+NOTE_I_VIDEO_OUTPUT = """\
+**UniVidX  ·  t2RAIN → 4× MP4 export**
+
+Same graph as t2RAIN_basic but each SaveImage is swapped for VHS_VideoCombine, so
+you get 4 MP4 files per run instead of 84 PNGs. Useful for direct delivery into
+video-editing software, AfterEffects, etc.
+
+**Requires:** ComfyUI-VideoHelperSuite (provides VHS_VideoCombine).
+
+**0.5.0 defaults wired in:**
+  • Loader: `dit_weight_mode = fp8_prequantized`
+  • Sampler: 20 steps, cfg=5.0, seed=42
+  • Each VHS_VideoCombine writes h264 at the source frame rate.
+
+**Expected wall on RTX 5090:** ~9-10 min  (one full t2RAIN run + ~5 s per modality MP4 encode)
+
+The output MP4s land in `ComfyUI/output/` named `unividx_t2RAIN_<modality>_*.mp4`.
+"""
 
 
 def workflow_I_video_output() -> dict:
@@ -488,7 +588,36 @@ def workflow_I_video_output() -> dict:
     ])
     validate_no_overlap(nodes, placed_groups)
     return finalize(nodes, placed_groups, links,
-                    name="UniVidX • t2RAIN -> 4 MP4 videos")
+                    name="UniVidX • t2RAIN -> 4 MP4 videos",
+                    note_text=NOTE_I_VIDEO_OUTPUT)
+
+
+NOTE_J_ALPHA_COMPOSITING = """\
+**UniVidX  ·  R2PFB → ImageCompositeMasked (end-to-end alpha composite demo)**
+
+Demonstrates that UniVidX's alpha matte is a real binary-quality mask, usable in
+standard ComfyUI compositing nodes. Pipeline:
+
+    [R2PFB sampler] → [Decode Alpha] →
+        ├── alpha       → ImageToMask  ─┐
+        └── foreground  ────────────────┴→ ImageCompositeMasked → SaveImage
+                            [EmptyImage cyan bg] ─┘
+
+**Drop a LoadImage in place of the EmptyImage** to composite the UniVidX foreground
+onto your own backdrop instead of a flat cyan plate. Or change the EmptyImage color.
+
+**0.5.0 defaults wired in:**
+  • Loader: `variant = alpha`,  `dit_weight_mode = fp8_prequantized`
+  • Sampler: 20 steps, cfg=5.0
+  • Foreground is the UniVidX-isolated subject; alpha is the matte; background is
+    discarded in favour of the EmptyImage plate.
+
+**Expected wall on RTX 5090:** ~10-12 min.
+
+**Switch to fast preview:** `step_distill_lora = lightx2v` + 4 steps + cfg=1.
+Matte quality at preview drops slightly — verify edge crispness if you composite
+fine-detail subjects (hair, fur, fabric).
+"""
 
 
 def workflow_J_alpha_compositing() -> dict:
@@ -539,7 +668,8 @@ def workflow_J_alpha_compositing() -> dict:
     ])
     validate_no_overlap(nodes, placed_groups)
     return finalize(nodes, placed_groups, links,
-                    name="UniVidX • R2PFB matte -> Composite over cyan background")
+                    name="UniVidX • R2PFB matte -> Composite over cyan background",
+                    note_text=NOTE_J_ALPHA_COMPOSITING)
 
 
 # ---------------------------------------------------------------------------
@@ -547,15 +677,26 @@ def workflow_J_alpha_compositing() -> dict:
 # ---------------------------------------------------------------------------
 
 def finalize(nodes: list[Node], groups: list[Group],
-             links: list[list], *, name: str) -> dict:
+             links: list[list], *, name: str,
+             note_text: str | None = None) -> dict:
     last_node_id = max((n.id for n in nodes), default=0)
     last_link_id = max((l[0] for l in links), default=0)
+    # If a description note is requested, give it an ID one past the
+    # last laid-out node so it doesn't collide.
+    note_nodes_payload = []
+    if note_text is not None:
+        note_id = last_node_id + 1
+        note_order = last_node_id  # render order doesn't matter for Note
+        note_nodes_payload = [
+            make_note_dict(note_text, node_id=note_id, order=note_order),
+        ]
+        last_node_id = note_id
     return {
         "id": name.replace(" ", "_").replace("•", "x").lower()[:64],
         "revision": 0,
         "last_node_id": last_node_id,
         "last_link_id": last_link_id,
-        "nodes": [
+        "nodes": note_nodes_payload + [
             {
                 "id": n.id,
                 "type": n.type,
@@ -613,6 +754,12 @@ def _ui_to_api(ui: dict) -> dict:
     for n in ui["nodes"]:
         nid = str(n["id"])
         ctype = n["type"]
+        # Note nodes are UI-only annotations (no execution semantics).
+        # Skip them in the API payload — ComfyUI's /prompt endpoint
+        # doesn't need them, and including them just clutters the
+        # programmatic-queue JSON.
+        if ctype == "Note":
+            continue
         widgets = list(n.get("widgets_values", []) or [])
         inputs: dict[str, Any] = {}
         # Resolve linked inputs

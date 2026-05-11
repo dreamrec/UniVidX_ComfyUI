@@ -1,15 +1,40 @@
 {
   "id": "unividx_x_t2rpfb_(text_->_r/p/f/b)",
   "revision": 0,
-  "last_node_id": 8,
+  "last_node_id": 9,
   "last_link_id": 7,
   "nodes": [
+    {
+      "id": 9,
+      "type": "Note",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        1100,
+        260
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "**UniVidX  ·  t2RPFB  ·  text → Composite / Alpha / Foreground / Background**\n\nAlpha-family decomposition at 432×768 (alpha variant's trained resolution), 21 frames.\n\n**0.5.0 defaults wired in:**\n  • Loader: `variant = alpha`,  `dit_weight_mode = fp8_prequantized`\n  • Sampler: `num_inference_steps = 20`,  `cfg_scale = 5.0`,  `seed = 42`\n\n**Expected wall on RTX 5090:** ~10-12 min  (alpha variant is slightly slower than intrinsic)\n\n⚠️  **Known model limit:** text-only alpha decomposition produces near-uniform-white mattes\n(mean ≈ 255, std ≈ 1) because the model can't decide what's foreground from text alone.\n**For sharp, content-driven alpha mattes use R2PFB_video_api.json** and feed an RGB video clip\n— PSNR-validated production output, ~12.4 min wall.\n\n**Switch to BF16 baseline:** `dit_weight_mode = bf16_shards`.\n\n**Switch to fast preview:** `step_distill_lora = lightx2v` + 4 steps + cfg=1\n(quality framing same as t2RAIN — preview-grade, not production-grade).\n"
+      ],
+      "color": "#3a4a6c",
+      "bgcolor": "#222a44"
+    },
     {
       "id": 1,
       "type": "UniVidXLoader",
       "pos": [
         80,
-        120
+        380
       ],
       "size": [
         320,
@@ -48,7 +73,7 @@
       "type": "UniVidXTaskMode",
       "pos": [
         80,
-        330
+        590
       ],
       "size": [
         320,
@@ -80,7 +105,7 @@
       "type": "UniVidXSampler",
       "pos": [
         560,
-        120
+        380
       ],
       "size": [
         420,
@@ -168,7 +193,7 @@
       "type": "UniVidXDecodeAlpha",
       "pos": [
         1140,
-        120
+        380
       ],
       "size": [
         280,
@@ -228,7 +253,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        120
+        380
       ],
       "size": [
         320,
@@ -257,7 +282,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        500
+        760
       ],
       "size": [
         320,
@@ -286,7 +311,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        880
+        1140
       ],
       "size": [
         320,
@@ -315,7 +340,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        1260
+        1520
       ],
       "size": [
         320,
@@ -403,7 +428,7 @@
       "title": "Model Setup",
       "bounding": [
         40,
-        60,
+        320,
         400,
         390
       ],
@@ -415,7 +440,7 @@
       "title": "Sampling",
       "bounding": [
         520,
-        60,
+        320,
         500,
         820
       ],
@@ -427,7 +452,7 @@
       "title": "Decode (Alpha)",
       "bounding": [
         1100,
-        60,
+        320,
         360,
         250
       ],
@@ -439,7 +464,7 @@
       "title": "Outputs (Composite / Pha / Fgr / Bgr)",
       "bounding": [
         1540,
-        60,
+        320,
         400,
         1520
       ],

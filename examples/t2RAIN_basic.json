@@ -1,15 +1,40 @@
 {
   "id": "unividx_x_t2rain_(text_->_rgb/a/i/n)",
   "revision": 0,
-  "last_node_id": 8,
+  "last_node_id": 9,
   "last_link_id": 7,
   "nodes": [
+    {
+      "id": 9,
+      "type": "Note",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        1100,
+        260
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "**UniVidX  ·  t2RAIN  ·  text → RGB / Albedo / Irradiance / Normal**\n\nDecomposes a 21-frame text-conditioned clip at 480×640 into the four intrinsic\nchannels. The model is Wan2.1-T2V-14B with UniVidX's per-modality PEFT adapters.\n\n**0.5.0 defaults wired in:**\n  • Loader: `dit_weight_mode = fp8_prequantized`   (≈14 GB DiT, fully resident on a 32 GB card)\n  • Sampler: `num_inference_steps = 20`,  `cfg_scale = 5.0`,  `seed = 42`\n\n**Expected wall on RTX 5090:** ~9-10 min  (first run +2-3 min for cold-load / FP8 quantize walk)\n\n**Switch to BF16 baseline:** flip loader → `dit_weight_mode = bf16_shards`   (+13% wall, identical pixel-for-pixel to 0.3.x)\n\n**Switch to fast preview (~5 min):**\n    Loader  → `step_distill_lora = lightx2v`,  `step_distill_strength = 1.0`\n    Sampler → `num_inference_steps = 4`,  `cfg_scale = 1.0`\n    Quality: ~22-26 dB PSNR vs production (visibly different but plausible decompositions).\n    Requires the LightX2V LoRA under `models/loras/lightx2v/` — see examples/README.md.\n\n**Known model limit (this workflow):** text-only conditioning produces general results;\nfor clean, content-specific decompositions feed an RGB video clip via R2AIN_video_api.json.\n"
+      ],
+      "color": "#3a4a6c",
+      "bgcolor": "#222a44"
+    },
     {
       "id": 1,
       "type": "UniVidXLoader",
       "pos": [
         80,
-        120
+        380
       ],
       "size": [
         320,
@@ -48,7 +73,7 @@
       "type": "UniVidXTaskMode",
       "pos": [
         80,
-        330
+        590
       ],
       "size": [
         320,
@@ -80,7 +105,7 @@
       "type": "UniVidXSampler",
       "pos": [
         560,
-        120
+        380
       ],
       "size": [
         420,
@@ -168,7 +193,7 @@
       "type": "UniVidXDecodeIntrinsic",
       "pos": [
         1140,
-        120
+        380
       ],
       "size": [
         280,
@@ -228,7 +253,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        120
+        380
       ],
       "size": [
         320,
@@ -257,7 +282,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        500
+        760
       ],
       "size": [
         320,
@@ -286,7 +311,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        880
+        1140
       ],
       "size": [
         320,
@@ -315,7 +340,7 @@
       "type": "SaveImage",
       "pos": [
         1580,
-        1260
+        1520
       ],
       "size": [
         320,
@@ -403,7 +428,7 @@
       "title": "Model Setup",
       "bounding": [
         40,
-        60,
+        320,
         400,
         390
       ],
@@ -415,7 +440,7 @@
       "title": "Sampling",
       "bounding": [
         520,
-        60,
+        320,
         500,
         820
       ],
@@ -427,7 +452,7 @@
       "title": "Decode (Intrinsic)",
       "bounding": [
         1100,
-        60,
+        320,
         360,
         250
       ],
@@ -439,7 +464,7 @@
       "title": "Outputs (RGB / Albedo / Irradiance / Normal)",
       "bounding": [
         1540,
-        60,
+        320,
         400,
         1520
       ],

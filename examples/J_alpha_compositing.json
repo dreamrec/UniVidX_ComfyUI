@@ -1,15 +1,40 @@
 {
   "id": "unividx_x_r2pfb_matte_->_composite_over_cyan_background",
   "revision": 0,
-  "last_node_id": 10,
+  "last_node_id": 11,
   "last_link_id": 10,
   "nodes": [
+    {
+      "id": 11,
+      "type": "Note",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        1100,
+        260
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "**UniVidX  ·  R2PFB → ImageCompositeMasked (end-to-end alpha composite demo)**\n\nDemonstrates that UniVidX's alpha matte is a real binary-quality mask, usable in\nstandard ComfyUI compositing nodes. Pipeline:\n\n    [R2PFB sampler] → [Decode Alpha] →\n        ├── alpha       → ImageToMask  ─┐\n        └── foreground  ────────────────┴→ ImageCompositeMasked → SaveImage\n                            [EmptyImage cyan bg] ─┘\n\n**Drop a LoadImage in place of the EmptyImage** to composite the UniVidX foreground\nonto your own backdrop instead of a flat cyan plate. Or change the EmptyImage color.\n\n**0.5.0 defaults wired in:**\n  • Loader: `variant = alpha`,  `dit_weight_mode = fp8_prequantized`\n  • Sampler: 20 steps, cfg=5.0\n  • Foreground is the UniVidX-isolated subject; alpha is the matte; background is\n    discarded in favour of the EmptyImage plate.\n\n**Expected wall on RTX 5090:** ~10-12 min.\n\n**Switch to fast preview:** `step_distill_lora = lightx2v` + 4 steps + cfg=1.\nMatte quality at preview drops slightly — verify edge crispness if you composite\nfine-detail subjects (hair, fur, fabric).\n"
+      ],
+      "color": "#3a4a6c",
+      "bgcolor": "#222a44"
+    },
     {
       "id": 1,
       "type": "UniVidXLoader",
       "pos": [
         80,
-        120
+        380
       ],
       "size": [
         320,
@@ -48,7 +73,7 @@
       "type": "UniVidXTaskMode",
       "pos": [
         80,
-        330
+        590
       ],
       "size": [
         320,
@@ -80,7 +105,7 @@
       "type": "LoadImage",
       "pos": [
         560,
-        120
+        380
       ],
       "size": [
         320,
@@ -117,7 +142,7 @@
       "type": "RepeatImageBatch",
       "pos": [
         560,
-        540
+        800
       ],
       "size": [
         320,
@@ -155,7 +180,7 @@
       "type": "UniVidXSampler",
       "pos": [
         1040,
-        120
+        380
       ],
       "size": [
         420,
@@ -244,7 +269,7 @@
       "type": "UniVidXDecodeAlpha",
       "pos": [
         1620,
-        120
+        380
       ],
       "size": [
         280,
@@ -296,7 +321,7 @@
       "type": "EmptyImage",
       "pos": [
         2060,
-        120
+        380
       ],
       "size": [
         280,
@@ -331,7 +356,7 @@
       "type": "ImageToMask",
       "pos": [
         2520,
-        120
+        380
       ],
       "size": [
         280,
@@ -369,7 +394,7 @@
       "type": "ImageCompositeMasked",
       "pos": [
         2500,
-        300
+        560
       ],
       "size": [
         320,
@@ -420,7 +445,7 @@
       "type": "SaveImage",
       "pos": [
         2980,
-        120
+        380
       ],
       "size": [
         320,
@@ -532,7 +557,7 @@
       "title": "Model Setup",
       "bounding": [
         40,
-        60,
+        320,
         400,
         390
       ],
@@ -544,7 +569,7 @@
       "title": "RGB Conditioning",
       "bounding": [
         520,
-        60,
+        320,
         400,
         600
       ],
@@ -556,7 +581,7 @@
       "title": "Sampling",
       "bounding": [
         1000,
-        60,
+        320,
         500,
         820
       ],
@@ -568,7 +593,7 @@
       "title": "Decode (Alpha)",
       "bounding": [
         1580,
-        60,
+        320,
         360,
         250
       ],
@@ -580,7 +605,7 @@
       "title": "Background",
       "bounding": [
         2020,
-        60,
+        320,
         360,
         230
       ],
@@ -592,7 +617,7 @@
       "title": "Composite",
       "bounding": [
         2460,
-        60,
+        320,
         400,
         480
       ],
@@ -604,7 +629,7 @@
       "title": "Output",
       "bounding": [
         2940,
-        60,
+        320,
         400,
         380
       ],
