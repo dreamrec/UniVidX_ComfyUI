@@ -93,6 +93,44 @@ class UniVidXLoader:
                         "model instances."
                     ),
                 }),
+                "step_distill_lora": (
+                    ["none", "lightx2v"],
+                    {
+                        "default": "none",
+                        "tooltip": (
+                            "Merge a step-distillation LoRA into the DiT "
+                            "base weights at load time, enabling near-"
+                            "production-quality decompositions at 4-6 "
+                            "sample steps + cfg_scale=1. Cuts wall-time "
+                            "per chunk by ~3-5x. Currently supports "
+                            "'lightx2v' (Wan2.1-T2V-14B-StepDistill-"
+                            "CfgDistill-Lightx2v, rank-64). EXPERIMENTAL: "
+                            "step-distill quality on UniVidX's per-"
+                            "modality decompositions (Albedo / Irradiance "
+                            "/ Normal / Alpha) is unverified - LightX2V "
+                            "was trained on natural-image content, not on "
+                            "synthetic decomposition targets. RGB-style "
+                            "outputs are most likely to retain quality; "
+                            "Normal and Alpha mattes are highest risk. "
+                            "Pairs with `step_distill_strength`. Requires "
+                            "the file under models/loras/lightx2v/ (see "
+                            "FileNotFoundError message for download cmd)."
+                        ),
+                    },
+                ),
+                "step_distill_strength": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05,
+                    "tooltip": (
+                        "Effective merge strength for the step-distill "
+                        "LoRA. 1.0 = standard merge (recommended for the "
+                        "distillation effect); 0.0 = no merge (equivalent "
+                        "to step_distill_lora='none'); >1.0 = overdrive "
+                        "(may produce artifacts but worth testing if "
+                        "1.0 gives weak step-reduction effect on your "
+                        "content). Cached as part of the model key, so "
+                        "changing this triggers a full reload."
+                    ),
+                }),
                 "dit_weight_mode": (
                     ["auto", "bf16_shards", "fp8_prequantized",
                      "fp8_runtime_experimental"],
@@ -132,7 +170,9 @@ class UniVidXLoader:
     def load(self, variant: str, dtype: str,
              compile_dit: bool = False, prefer_sage_attn: bool = False,
              vram_buffer_gb: float = 4.0,
-             dit_weight_mode: str = "auto"):
+             dit_weight_mode: str = "auto",
+             step_distill_lora: str = "none",
+             step_distill_strength: float = 1.0):
         # Resolve the effective weight-load mode. `auto` collapses to the
         # value implied by the legacy `dtype` widget so old saved
         # workflows preserve their 0.3.x behaviour without action.
@@ -162,6 +202,8 @@ class UniVidXLoader:
             prefer_sage_attn=bool(prefer_sage_attn),
             dit_weight_mode=effective_mode,
             quantize_fp8=None,
+            step_distill_lora=str(step_distill_lora),
+            step_distill_strength=float(step_distill_strength),
         )
 
         if effective_mode == "fp8_runtime_experimental":

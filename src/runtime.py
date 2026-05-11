@@ -18,6 +18,7 @@ import sys
 import threading
 from collections import OrderedDict
 from pathlib import Path
+from typing import Optional
 
 # Fail fast on stale ComfyUI installs that drop this folder into a
 # Python 3.9 runtime — the `str | None` PEP 604 union syntax later in
@@ -90,7 +91,9 @@ def unividx_cwd():
 def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch.bfloat16,
                vram_buffer: float = 4.0, quantize_fp8: str | None = None,
                compile_dit: bool = False, prefer_sage_attn: bool = False,
-               dit_weight_mode: str = "bf16_shards"):
+               dit_weight_mode: str = "bf16_shards",
+               step_distill_lora: str = "none",
+               step_distill_strength: float = 1.0):
     """
     Load (or return from cache) UniVidIntrinsic or UniVidAlpha.
 
@@ -129,7 +132,8 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
     ckpt = paths[f"univid_{variant}_ckpt"]
     cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
                  quantize_fp8, bool(compile_dit), bool(prefer_sage_attn),
-                 dit_weight_mode)
+                 dit_weight_mode, step_distill_lora,
+                 float(step_distill_strength))
 
     with _LOAD_LOCK:
         if cache_key in _MODEL_CACHE:
@@ -268,6 +272,16 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
                     type(model).__name__,
                 )
 
+            # Tier C: merge step-distill (LightX2V) into base weights BEFORE
+            # FP8 substitution so the quantization captures the merged
+            # state. PEFT-aware — descends through UniVidX's modality
+            # adapter wrappers, applies to the inner base_layer only.
+            if step_distill_lora and step_distill_lora != "none":
+                _apply_step_distill_merge(
+                    model, lora_kind=step_distill_lora,
+                    strength=float(step_distill_strength),
+                )
+
             if dit_weight_mode == "fp8_prequantized":
                 _apply_fp8_substitution(model, variant)
 
@@ -276,6 +290,94 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
 
         _MODEL_CACHE[cache_key] = model
         return model
+
+
+def _resolve_step_distill_path(lora_kind: str) -> Optional[str]:
+    """Locate a step-distill LoRA file on disk by kind. Returns None
+    if not found so the caller can surface a clear error.
+
+    Search candidates per kind:
+      lightx2v: models/loras/lightx2v/loras/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors
+                (the layout `hf download lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v
+                 loras/...  --local-dir models/loras/lightx2v` produces)
+                Falls back to a flat copy at models/loras/lightx2v/<filename>.
+    """
+    root = Path(_comfy_root())
+    if lora_kind == "lightx2v":
+        candidates = [
+            root / "models" / "loras" / "lightx2v" / "loras"
+            / "Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+            root / "models" / "loras" / "lightx2v"
+            / "Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+            root / "models" / "loras"
+            / "Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors",
+        ]
+    else:
+        return None
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def _apply_step_distill_merge(model, *, lora_kind: str, strength: float) -> None:
+    """Load a step-distill LoRA safetensors and merge it into the DiT's
+    base weights in place.
+
+    For LightX2V: keys are prefixed with `diffusion_model.`, use Kohya
+    `lora_down/lora_up` naming for Linear deltas, plus `.diff_b` for
+    bias deltas and `.diff` for direct weight deltas on non-Linear
+    modules (RMSNorm, patch_embedding, head).
+
+    PEFT-aware via lora_merge._descend_peft — the merge applies to the
+    .base_layer Linear inside UniVidX's per-modality wrappers; the
+    LoRA siblings (lora_A_rgb/albedo/irradiance/normal etc.) stay
+    untouched.
+    """
+    path = _resolve_step_distill_path(lora_kind)
+    if path is None:
+        raise FileNotFoundError(
+            f"Step-distill LoRA '{lora_kind}' not found on disk. "
+            f"Expected layout:\n"
+            f"  models/loras/lightx2v/loras/"
+            f"Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors\n\n"
+            f"Download via:\n"
+            f"  hf download lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v "
+            f"loras/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors "
+            f"--local-dir ComfyUI/models/loras/lightx2v\n\n"
+            f"Or set step_distill_lora='none' to skip the merge."
+        )
+    from safetensors.torch import load_file as _load_safetensors
+    from .lora_merge import merge_lora_into_base
+
+    _log.info("Loading step-distill LoRA (%s) from %s", lora_kind, path)
+    sd = _load_safetensors(path)
+    try:
+        report = merge_lora_into_base(
+            model.pipe.dit, sd,
+            strength=strength,
+            strip_prefix="diffusion_model.",
+        )
+    finally:
+        del sd
+        import gc as _gc
+        _gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    _log.info(
+        "Step-distill merge complete (%s, strength=%.2f): "
+        "%d Linears merged, %d biases patched, %d weights patched, "
+        "%d unmatched, %d skipped",
+        lora_kind, strength,
+        report["merged"], report["biases_patched"],
+        report["weights_patched"], report["unmatched"], report["skipped"],
+    )
+    if report["merged"] == 0 and report["weights_patched"] == 0:
+        _log.warning(
+            "Step-distill merge applied 0 deltas — the LoRA's key "
+            "structure may not match UniVidX's WanModel layout."
+        )
 
 
 def _resolve_fp8_weights_path() -> str | None:
