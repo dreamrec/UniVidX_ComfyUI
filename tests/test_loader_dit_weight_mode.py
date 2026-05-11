@@ -124,25 +124,45 @@ def test_loader_exposes_dit_weight_mode_widget():
 # Auto mode preserves 0.3.0 behaviour
 # ---------------------------------------------------------------------------
 
-def test_dit_weight_mode_auto_with_bfloat16_loads_bf16_shards(stub_runtime):
-    """dit_weight_mode='auto' + dtype='bfloat16' → BF16 shards path
-    (the 0.3.0 default behaviour, unchanged)."""
+def test_dit_weight_mode_auto_with_bfloat16_resolves_to_fp8_prequantized(
+        stub_runtime, monkeypatch):
+    """0.5.0 default change (post-audit): `dit_weight_mode='auto'` +
+    `dtype='bfloat16'` now resolves to `fp8_prequantized`, NOT
+    `bf16_shards` as in 0.4.0. The README's "just use FP8"
+    recommendation requires that the default code path actually use
+    FP8 when the user doesn't set dit_weight_mode explicitly.
+
+    Old workflows that want the 0.3.x BF16 baseline must set
+    `dit_weight_mode='bf16_shards'` explicitly."""
+    from src import runtime
     from nodes.loader import UniVidXLoader
-    out = UniVidXLoader().load(variant="intrinsic", dtype="bfloat16",
-                               dit_weight_mode="auto")
-    model, variant = out[0]
-    assert variant == "intrinsic"
-    # Sanity: model was constructed, no FP8-related kwargs touched it.
-    assert isinstance(model, _FakeUniVidModel)
+
+    fp8_sub_calls: list[str] = []
+    monkeypatch.setattr(runtime, "_apply_fp8_substitution",
+                        lambda model, variant: fp8_sub_calls.append(variant))
+
+    UniVidXLoader().load(variant="intrinsic", dtype="bfloat16",
+                         dit_weight_mode="auto")
+    assert fp8_sub_calls == ["intrinsic"], (
+        f"expected auto+bfloat16 to dispatch to FP8 substitution; "
+        f"got {fp8_sub_calls=}"
+    )
 
 
-def test_dit_weight_mode_auto_with_legacy_fp8_routes_to_experimental(
-        stub_runtime, caplog):
-    """dtype='fp8_e4m3fn' + dit_weight_mode='auto' must route through
-    the legacy runtime-quantize path (now branded
-    `fp8_runtime_experimental`) AND emit a DeprecationWarning-flavored
-    log so users see the migration signal."""
+def test_dit_weight_mode_legacy_fp8_dtype_auto_migrates_with_deprecation(
+        stub_runtime, monkeypatch, caplog):
+    """0.5.0 behavior (post-audit): the legacy `dtype='fp8_e4m3fn'` /
+    `dtype='fp8_e5m2'` values no longer route to the known-hanging
+    `fp8_runtime_experimental` path. Instead they auto-migrate to
+    `dtype=bfloat16` + `dit_weight_mode='fp8_prequantized'` (the
+    supported FP8 path) AND emit a deprecation WARNING so the user
+    sees the migration signal and updates their workflow."""
+    from src import runtime
     from nodes.loader import UniVidXLoader
+
+    fp8_sub_calls: list[str] = []
+    monkeypatch.setattr(runtime, "_apply_fp8_substitution",
+                        lambda model, variant: fp8_sub_calls.append(variant))
 
     with caplog.at_level(logging.WARNING, logger="unividx"):
         UniVidXLoader().load(variant="intrinsic", dtype="fp8_e4m3fn",
@@ -150,13 +170,16 @@ def test_dit_weight_mode_auto_with_legacy_fp8_routes_to_experimental(
 
     deprecation_lines = [r for r in caplog.records
                          if "deprecat" in r.message.lower()
-                         and ("fp8_e4m3fn" in r.message
-                              or "fp8_runtime_experimental" in r.message
-                              or "0.4.0" in r.message)]
+                         and "fp8_e4m3fn" in r.message]
     assert deprecation_lines, (
-        "expected a deprecation WARNING mentioning fp8_e4m3fn / "
-        "fp8_runtime_experimental / 0.4.0; got: "
-        f"{[r.message for r in caplog.records]}"
+        "expected a deprecation WARNING mentioning the legacy "
+        f"fp8_e4m3fn dtype; got: {[r.message for r in caplog.records]}"
+    )
+    # AND the load actually used the supported FP8 path (not the
+    # hanging mmgp.offload.quantize one).
+    assert fp8_sub_calls == ["intrinsic"], (
+        f"legacy dtype should auto-migrate to fp8_prequantized; "
+        f"got {fp8_sub_calls=}"
     )
 
 
@@ -266,24 +289,45 @@ def test_apply_fp8_substitution_dispatches_to_file_when_scaled_file_present(
     assert file_calls == [fake_path]
 
 
-def test_dit_weight_mode_bf16_shards_overrides_legacy_fp8_dtype(
-        stub_runtime, caplog):
-    """Explicit dit_weight_mode='bf16_shards' must win over legacy
-    dtype=fp8_e4m3fn — gives users a way to short-circuit the
-    deprecated path without changing the dtype enum."""
+def test_dit_weight_mode_legacy_fp8_dtype_migrates_even_when_bf16_shards_set(
+        stub_runtime, monkeypatch, caplog):
+    """0.5.0 contract (post-audit): legacy `dtype=fp8_e4m3fn` ALWAYS
+    auto-migrates to `fp8_prequantized`, even when the user has
+    explicitly set `dit_weight_mode='bf16_shards'`.
+
+    Rationale: the legacy dtype values were documented as removed in
+    0.4.0; we keep them in the enum only for back-compat with old
+    saved workflows. Their previous behavior — silently routing to
+    `fp8_runtime_experimental` (the known-hanging mmgp.offload.quantize
+    path) — was the worst of both worlds. Auto-migrating to the
+    supported FP8 path makes the legacy dtype usable without a
+    silent route to brokenness, at the cost of overriding an explicit
+    dit_weight_mode the user might also have set.
+
+    If a user genuinely wants BF16, they should set BOTH dtype=bfloat16
+    AND dit_weight_mode=bf16_shards. The deprecation log makes the
+    migration visible so they can update accordingly."""
+    from src import runtime
     from nodes.loader import UniVidXLoader
 
-    out = UniVidXLoader().load(variant="intrinsic", dtype="fp8_e4m3fn",
-                                dit_weight_mode="bf16_shards")
-    model, _ = out[0]
-    assert isinstance(model, _FakeUniVidModel)
-    # No deprecation warning should fire because the legacy path
-    # wasn't taken.
+    fp8_sub_calls: list[str] = []
+    monkeypatch.setattr(runtime, "_apply_fp8_substitution",
+                        lambda model, variant: fp8_sub_calls.append(variant))
+
+    with caplog.at_level(logging.WARNING, logger="unividx"):
+        UniVidXLoader().load(variant="intrinsic", dtype="fp8_e4m3fn",
+                              dit_weight_mode="bf16_shards")
+    # The deprecation log fires regardless of dit_weight_mode override.
     deprecation_lines = [r for r in caplog.records
                          if "deprecat" in r.message.lower()]
-    assert not deprecation_lines, (
-        f"unexpected deprecation log when bf16_shards overrides fp8 dtype: "
-        f"{[r.message for r in deprecation_lines]}"
+    assert deprecation_lines, (
+        "expected deprecation log even with explicit bf16_shards; "
+        f"got: {[r.message for r in caplog.records]}"
+    )
+    # And the load actually used FP8 (not BF16).
+    assert fp8_sub_calls == ["intrinsic"], (
+        f"legacy fp8 dtype should override explicit bf16_shards; "
+        f"got {fp8_sub_calls=}"
     )
 
 

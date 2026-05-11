@@ -145,13 +145,24 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
         # model so we never have two big models in VRAM simultaneously
         # (peak host RAM during cold-load is ~28 GB; doubling that
         # OOMs on a 32 GB card with anything else resident).
+        # Index map for cache_key tuple — keep in sync with the
+        # cache_key construction below. Indexed access here so the
+        # diagnostic log stays correct when cache_key gains new fields.
+        # 0=variant, 1=ckpt, 2=device, 3=dtype, 4=vram_buffer,
+        # 5=quantize_fp8, 6=compile_dit, 7=prefer_sage_attn,
+        # 8=dit_weight_mode, 9=step_distill_lora, 10=step_distill_strength
         while len(_MODEL_CACHE) >= max(1, _MODEL_CACHE_MAX_SIZE):
             evicted_key, evicted_model = _MODEL_CACHE.popitem(last=False)
             _log.info(
                 "Evicting LRU model cache entry (variant=%s, "
-                "dit_weight_mode=%s, vram_buffer=%s) to stay within "
-                "UNIVIDX_MODEL_CACHE_MAX=%d",
-                evicted_key[0], evicted_key[-1], evicted_key[4],
+                "dit_weight_mode=%s, vram_buffer=%s, "
+                "step_distill_lora=%s, step_distill_strength=%s) "
+                "to stay within UNIVIDX_MODEL_CACHE_MAX=%d",
+                evicted_key[0],     # variant
+                evicted_key[8],     # dit_weight_mode (was -1, that's step_distill_strength)
+                evicted_key[4],     # vram_buffer
+                evicted_key[9],     # step_distill_lora
+                evicted_key[10],    # step_distill_strength
                 _MODEL_CACHE_MAX_SIZE,
             )
             del evicted_model
@@ -241,6 +252,23 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             if quantize_fp8:
                 _quantize_dit_fp8(model, qtype=quantize_fp8)
 
+            # Tier C: step-distill merge MUST happen before
+            # enable_vram_management(). Why: enable_vram_management wraps
+            # non-Linear modules (RMSNorms, patch_embedding, head) in
+            # AutoWrappedModule whose internal layout indirects through
+            # `.module.weight` — at which point LightX2V's `.diff` keys
+            # (addressed against bare `<base>.weight` paths) silently
+            # skip. The lora_merge resolver now descends through both
+            # PEFT `.base_layer` AND vram-mgmt `.module` for robustness,
+            # but doing the merge first means we never depend on the
+            # second descent (less surface for the same kind of bug
+            # to recur in a future refactor).
+            if step_distill_lora and step_distill_lora != "none":
+                _apply_step_distill_merge(
+                    model, lora_kind=step_distill_lora,
+                    strength=float(step_distill_strength),
+                )
+
             # Wire vram_buffer to UniVidX's pipeline-level VRAM manager.
             # The method lives on `model.pipe` — an instance of UniVidX's
             # OWN WanVideoPipeline subclass (vendor/UniVidX/src/pipelines/
@@ -270,16 +298,6 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
                     "model.pipe.enable_vram_management() not found on "
                     "%s; vram_buffer_gb has no effect on this build.",
                     type(model).__name__,
-                )
-
-            # Tier C: merge step-distill (LightX2V) into base weights BEFORE
-            # FP8 substitution so the quantization captures the merged
-            # state. PEFT-aware — descends through UniVidX's modality
-            # adapter wrappers, applies to the inner base_layer only.
-            if step_distill_lora and step_distill_lora != "none":
-                _apply_step_distill_merge(
-                    model, lora_kind=step_distill_lora,
-                    strength=float(step_distill_strength),
                 )
 
             if dit_weight_mode == "fp8_prequantized":

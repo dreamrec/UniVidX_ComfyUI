@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -54,7 +55,60 @@ from PIL import Image
 
 REPO = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8000"
-COMFY_OUTPUT = Path("C:/Users/dr5090/Documents/ComfyUI/output")
+
+
+def _detect_comfy_output_dir(cli_arg: str | None = None) -> Path:
+    """Locate ComfyUI's output directory so we can find the per-chunk
+    PNGs written by SaveImage nodes.
+
+    Resolution order:
+      1. Explicit CLI arg if provided (`--comfy-output-dir <path>`)
+      2. `UNIVIDX_COMFY_OUTPUT` env var
+      3. Live query: GET /system_stats and infer from --output-directory
+         in the running ComfyUI process's argv
+      4. Conventional fallback: `<repo_root>/output` (works for portable
+         ComfyUI installs where the repo IS the comfy root)
+
+    Raises FileNotFoundError if none of these resolves to an existing
+    directory.
+    """
+    candidates: list[Path] = []
+    if cli_arg:
+        candidates.append(Path(cli_arg))
+    env_val = os.environ.get("UNIVIDX_COMFY_OUTPUT")
+    if env_val:
+        candidates.append(Path(env_val))
+    # Try the live ComfyUI server: --output-directory is in /system_stats argv.
+    try:
+        with urllib.request.urlopen(f"{BASE}/system_stats", timeout=5) as resp:
+            stats = json.load(resp)
+        argv = stats.get("system", {}).get("argv", []) or []
+        for i, a in enumerate(argv):
+            if a == "--output-directory" and i + 1 < len(argv):
+                candidates.append(Path(argv[i + 1]))
+                break
+    except Exception:
+        pass
+    # Conventional fallback for portable ComfyUI installs that look like
+    # <ComfyUI>/custom_nodes/UniVidX_ComfyUI/, so output is at
+    # <ComfyUI>/output/ — three parents up from this file.
+    candidates.append(REPO.parent.parent / "output")
+
+    for c in candidates:
+        if c.is_dir():
+            return c
+    raise FileNotFoundError(
+        "Could not locate ComfyUI's output directory. Pass "
+        "--comfy-output-dir <path>, set UNIVIDX_COMFY_OUTPUT in the "
+        "environment, or run this script from a system where the "
+        f"running ComfyUI server reports it via /system_stats.\n"
+        f"Tried: {[str(c) for c in candidates]}"
+    )
+
+
+# Resolved lazily in main() after CLI parsing. Module-level callers
+# should use _detect_comfy_output_dir() directly.
+COMFY_OUTPUT: Path = REPO.parent.parent / "output"  # placeholder for type hints
 
 # Map our preset names onto the loader/sampler settings the workflow
 # templates expect.
@@ -349,7 +403,17 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--width", type=int, default=480)
     ap.add_argument("--height", type=int, default=640)
+    ap.add_argument("--comfy-output-dir", type=str, default=None,
+                    help="ComfyUI's output directory (where SaveImage "
+                         "writes per-chunk PNGs we then stitch). If "
+                         "omitted, resolved via the UNIVIDX_COMFY_OUTPUT "
+                         "env var, the live /system_stats argv, or a "
+                         "portable-install fallback. See "
+                         "_detect_comfy_output_dir() for the full order.")
     args = ap.parse_args()
+    global COMFY_OUTPUT
+    COMFY_OUTPUT = _detect_comfy_output_dir(args.comfy_output_dir)
+    print(f"ComfyUI output dir: {COMFY_OUTPUT}")
 
     if not args.input.is_file():
         print(f"input not found: {args.input}", file=sys.stderr)

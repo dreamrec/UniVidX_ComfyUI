@@ -72,14 +72,46 @@ def _resolve_target(model: nn.Module, dotted: str
     return obj
 
 
-def _descend_peft(module: nn.Module) -> nn.Module:
-    """If module is a PEFT-style wrapper with .base_layer holding a
-    Linear, return the base_layer. Otherwise return module unchanged."""
-    if (not isinstance(module, nn.Linear)
-            and hasattr(module, "base_layer")
-            and isinstance(getattr(module, "base_layer"), nn.Module)):
-        return module.base_layer
+def _descend_wrappers(module: nn.Module) -> nn.Module:
+    """Strip both PEFT-style and VRAM-management-style wrappers so the
+    merge applies to the real inner module's `.weight` / `.bias`.
+
+    Two distinct wrapper conventions we encounter in this codebase:
+
+      PEFT (peft.tuners.lora.Linear):
+          wrapper.base_layer = nn.Linear     ← descend here
+
+      UniVidX VRAM mgmt (AutoWrappedModule, applied to non-Linear modules
+      like RMSNorm + Conv3d during pipe.enable_vram_management()):
+          wrapper.module = original_module   ← descend here
+
+    Returns the deepest non-wrapper module. Idempotent on plain modules.
+    Order doesn't matter for our targets (PEFT only wraps Linears, VRAM
+    only wraps non-Linears via AutoWrappedModule), but we apply both
+    descents defensively so a future stack change doesn't re-create the
+    P1 audit bug.
+    """
+    for _ in range(4):  # bounded; real depth is at most 2
+        if (not isinstance(module, nn.Linear)
+                and hasattr(module, "base_layer")
+                and isinstance(getattr(module, "base_layer"), nn.Module)):
+            module = module.base_layer
+            continue
+        if (hasattr(module, "module")
+                and isinstance(getattr(module, "module"), nn.Module)
+                # Don't be fooled by nn.ModuleList / nn.ModuleDict which
+                # also have a `.module`-shaped internal — those are not
+                # what AutoWrappedModule looks like. AutoWrappedModule
+                # stores a single submodule with .weight.
+                and hasattr(getattr(module, "module"), "weight")):
+            module = module.module
+            continue
+        break
     return module
+
+
+# Back-compat alias for any callers using the old name.
+_descend_peft = _descend_wrappers
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +258,7 @@ def merge_lora_into_base(
             unmatched += 1
             _log.debug("lora_merge: no target for %s", base)
             continue
-        target = _descend_peft(target)
+        target = _descend_wrappers(target)
 
         # Per-key alpha override
         per_key_alpha = None

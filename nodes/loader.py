@@ -132,30 +132,46 @@ class UniVidXLoader:
                     ),
                 }),
                 "dit_weight_mode": (
-                    ["auto", "bf16_shards", "fp8_prequantized",
+                    ["fp8_prequantized", "bf16_shards", "auto",
                      "fp8_runtime_experimental"],
                     {
-                        "default": "auto",
+                        "default": "fp8_prequantized",
                         "tooltip": (
                             "How the DiT weights are stored after load. "
-                            "`auto` (default): pick from the dtype widget — "
-                            "bfloat16/float16 → bf16_shards, "
-                            "fp8_e4m3fn/fp8_e5m2 → fp8_runtime_experimental "
-                            "(preserves 0.3.x behaviour, DEPRECATED). "
-                            "`bf16_shards`: standard BF16 path, ~28 GB DiT in "
-                            "VRAM (with vram_buffer streaming layers as needed). "
-                            "`fp8_prequantized`: cold-load BF16 shards as "
-                            "usual, then runtime-quantize all DiT Linears to "
-                            "FP8 e4m3fn with per-tensor absmax scaling. "
-                            "Steady-state VRAM drops to ~14 GB (the FP8 "
-                            "matmul still dequantizes to BF16 on forward in "
-                            "Phase 1; Phase 2 will use torch._scaled_mm). "
-                            "LoRA adapters stay BF16. PEFT-aware. "
+                            "0.5.0 default: `fp8_prequantized`. "
+                            "\n\n"
+                            "`fp8_prequantized` (recommended): the DiT's "
+                            "~400 Linears + biases + norms are converted "
+                            "to FP8 e4m3fn after the standard BF16 "
+                            "cold-load. Two implementation paths share "
+                            "this label — (a) FILE-BASED if a Kijai "
+                            "`Wan2_1-T2V-14B_fp8_e4m3fn_scaled.safetensors` "
+                            "is present under models/diffusion_models/ "
+                            "(no such file exists upstream for Wan2.1 "
+                            "as of 0.5.0; reserved forward-compat slot), "
+                            "(b) RUNTIME-QUANTIZE otherwise (the actual "
+                            "0.5.0 path on every Wan2.1 install today). "
+                            "Quality: PSNR ≥ 30 dB per modality vs BF16 "
+                            "reference. Wall: 9.43 min on R2AIN_video, "
+                            "13% faster than bf16_shards, ~14 GB DiT VRAM. "
+                            "\n\n"
+                            "`bf16_shards`: standard BF16 path — ~28 GB "
+                            "DiT in VRAM (with vram_buffer streaming "
+                            "layers as needed). The 0.3.x baseline. "
+                            "Pixel-for-pixel identical to UniVidX's "
+                            "vanilla output but slower. "
+                            "\n\n"
+                            "`auto` (legacy): preserved for back-compat "
+                            "with old saved workflows. In 0.5.0+ this "
+                            "resolves to `fp8_prequantized` (was "
+                            "`bf16_shards` in 0.4.0). "
+                            "\n\n"
                             "`fp8_runtime_experimental`: legacy "
                             "mmgp.offload.quantize() pass after BF16 cold "
-                            "load — known to hang on this stack. The "
-                            "dtype=fp8_* values route here for now; both will "
-                            "be removed in 0.4.0."
+                            "load — known to hang on this stack. Kept "
+                            "only as an escape hatch for users who need "
+                            "to replicate pre-0.4.0 quirks; will be "
+                            "removed in 0.6.0."
                         ),
                     },
                 ),
@@ -170,19 +186,42 @@ class UniVidXLoader:
     def load(self, variant: str, dtype: str,
              compile_dit: bool = False, prefer_sage_attn: bool = False,
              vram_buffer_gb: float = 4.0,
-             dit_weight_mode: str = "auto",
+             dit_weight_mode: str = "fp8_prequantized",
              step_distill_lora: str = "none",
              step_distill_strength: float = 1.0):
-        # Resolve the effective weight-load mode. `auto` collapses to the
-        # value implied by the legacy `dtype` widget so old saved
-        # workflows preserve their 0.3.x behaviour without action.
-        legacy_fp8_qtype = {"fp8_e4m3fn": "qfloat8",
-                            "fp8_e5m2": "qfloat8_e5m2"}.get(dtype)
+        # Legacy dtype=fp8_e4m3fn / fp8_e5m2: the README has documented
+        # these as DEPRECATED since 0.4.0 and "removed in 0.5.0" — but
+        # the enum values are still in the dtype widget for backward-
+        # compat with old saved workflows. Per the 2026-05-11 external
+        # audit, the current behavior of silently routing to the
+        # known-hanging `fp8_runtime_experimental` path is the worst
+        # of both worlds. Migrate them to the supported fp8_prequantized
+        # path with a deprecation warning so the user lands somewhere
+        # working, and surface the migration so they know to update
+        # their saved workflow.
+        if dtype in ("fp8_e4m3fn", "fp8_e5m2"):
+            _log.warning(
+                "dtype=%s is DEPRECATED (since 0.4.0). The legacy "
+                "mmgp.offload.quantize() path was removed; auto-"
+                "migrating this load to dtype=bfloat16 + "
+                "dit_weight_mode=fp8_prequantized (the supported FP8 "
+                "path). Update your workflow's loader widgets to "
+                "silence this warning: set dtype=bfloat16 and "
+                "dit_weight_mode=fp8_prequantized. The dtype=fp8_* "
+                "values will be removed entirely in 0.6.0.",
+                dtype,
+            )
+            dtype = "bfloat16"
+            dit_weight_mode = "fp8_prequantized"
+
         effective_mode = dit_weight_mode
         if effective_mode == "auto":
-            effective_mode = ("fp8_runtime_experimental"
-                              if legacy_fp8_qtype is not None
-                              else "bf16_shards")
+            # `auto` is retained for back-compat with old saved
+            # workflows; it now resolves to fp8_prequantized (the
+            # 0.5.0-recommended default), not bf16_shards as in 0.4.0.
+            # Set dit_weight_mode='bf16_shards' explicitly if you want
+            # the 0.3.x baseline behavior.
+            effective_mode = "fp8_prequantized"
 
         # Compute dtype is BF16 for every FP8-related mode (UniVidX
         # constructs the pipeline at BF16 regardless; quantization /

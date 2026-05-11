@@ -319,6 +319,62 @@ def test_merge_lora_into_base_applies_weight_diff_for_norms():
     assert report.get("weights_patched", 0) >= 1
 
 
+def test_merge_lora_into_base_descends_into_autowrapped_module():
+    """Regression for P1 (2026-05-11 external audit): UniVidX's
+    `enable_vram_management()` wraps non-Linear modules (RMSNorms,
+    Conv3d patch_embedding, head) in `AutoWrappedModule`, which stores
+    the original module at `.module`. The state-dict path therefore
+    becomes `<base>.module.weight` — but LightX2V's `.diff` patches
+    address the bare `<base>.weight` path. Without descent through
+    `.module`, `_apply_weight_diff` finds the wrapper, sees
+    `hasattr(target, 'weight') is False`, and silently skips the
+    patch (incremented `skipped`, no per-key warning).
+
+    The fix: re-order step_distill before enable_vram_management so
+    AutoWrappedModule wrapping happens AFTER the merge — and
+    additionally make the resolver descend through `.module` so the
+    merge still works if someone wires the order differently in a
+    future code path. Both belt and braces.
+    """
+    from src.lora_merge import merge_lora_into_base
+
+    class _AutoWrappedLike(nn.Module):
+        """Stand-in for UniVidX's AutoWrappedModule. Holds the real
+        module at .module — that's the indirection that bit us."""
+
+        def __init__(self, inner):
+            super().__init__()
+            self.module = inner
+
+        def forward(self, x):
+            return self.module(x)
+
+    class _WithNorm(nn.Module):
+        def __init__(self):
+            super().__init__()
+            inner_norm = nn.RMSNorm(8)
+            # Wrap it the way enable_vram_management would.
+            self.norm_q = _AutoWrappedLike(inner_norm)
+
+    model = _WithNorm()
+    inner = model.norm_q.module
+    n = 8
+    diff = torch.linspace(-0.1, 0.1, n)
+    weight_before = inner.weight.data.clone()
+    lora_sd = {"norm_q.diff": diff}
+
+    report = merge_lora_into_base(model, lora_sd, strength=1.0, rank=n)
+
+    expected = weight_before + diff
+    assert torch.allclose(inner.weight.data, expected, atol=1e-5), (
+        f"merge did not descend through .module wrapper; "
+        f"inner.weight unchanged "
+        f"(max diff {(inner.weight.data - expected).abs().max().item():.5f})"
+    )
+    assert report["weights_patched"] >= 1
+    assert report["unmatched"] == 0
+
+
 def test_merge_lora_into_base_alpha_inferred_from_lora_state_dict_alpha_key():
     """Some LoRA files include an `<key>.alpha` scalar tensor encoding
     the alpha-per-target_module value. When present, the merge should
