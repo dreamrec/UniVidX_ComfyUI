@@ -5,12 +5,16 @@ UniVidXLoader: load univid_intrinsic.safetensors or univid_alpha.safetensors.
 Outputs UNIVIDX_MODEL — an opaque tuple (model_instance, variant_name) that
 flows into the sampler.
 """
+import logging
+
 import torch
 
 try:
     from ..src.runtime import load_model  # when imported as the UniVidX_ComfyUI package (ComfyUI runtime)
 except ImportError:
     from src.runtime import load_model    # when imported flat (smoke test)
+
+_log = logging.getLogger("unividx")
 
 
 class UniVidXLoader:
@@ -89,6 +93,31 @@ class UniVidXLoader:
                         "model instances."
                     ),
                 }),
+                "dit_weight_mode": (
+                    ["auto", "bf16_shards", "fp8_prequantized",
+                     "fp8_runtime_experimental"],
+                    {
+                        "default": "auto",
+                        "tooltip": (
+                            "How the DiT weights are loaded. "
+                            "`auto` (default): pick from the dtype widget — "
+                            "bfloat16/float16 → bf16_shards, "
+                            "fp8_e4m3fn/fp8_e5m2 → fp8_runtime_experimental "
+                            "(preserves 0.3.x behaviour). "
+                            "`bf16_shards`: force the upstream six-shard BF16 "
+                            "load even if dtype is set to fp8_*. "
+                            "`fp8_prequantized`: load Kijai's pre-quantized "
+                            "Wan2.1-T2V-14B FP8 weights directly (Tier B; "
+                            "half the host RAM cold-load, full FP8 residency "
+                            "on 32 GB cards). "
+                            "`fp8_runtime_experimental`: legacy "
+                            "mmgp.offload.quantize() pass after a BF16 cold "
+                            "load — known to hang on this stack. The "
+                            "dtype=fp8_* values route here for now; both will "
+                            "be removed in 0.4.0."
+                        ),
+                    },
+                ),
             },
         }
 
@@ -99,17 +128,69 @@ class UniVidXLoader:
 
     def load(self, variant: str, dtype: str,
              compile_dit: bool = False, prefer_sage_attn: bool = False,
-             vram_buffer_gb: float = 4.0):
-        # FP8 path: load as bfloat16 (UniVidX construction is hardcoded BF16),
-        # then post-quantize the DiT via mmgp/optimum-quanto.
-        # `fp8_variant` is the optimum-quanto qtype name (or None for non-FP8
-        # dtypes); load_model uses None as the "skip quantization" sentinel.
-        fp8_variant = {"fp8_e4m3fn": "qfloat8", "fp8_e5m2": "qfloat8_e5m2"}.get(dtype)
-        compute_dtype = torch.bfloat16 if fp8_variant is not None \
-            else {"bfloat16": torch.bfloat16, "float16": torch.float16}[dtype]
-        model = load_model(variant, device="cuda", dtype=compute_dtype,
-                           vram_buffer=float(vram_buffer_gb),
-                           quantize_fp8=fp8_variant,
-                           compile_dit=bool(compile_dit),
-                           prefer_sage_attn=bool(prefer_sage_attn))
+             vram_buffer_gb: float = 4.0,
+             dit_weight_mode: str = "auto"):
+        # Resolve the effective weight-load mode. `auto` collapses to the
+        # value implied by the legacy `dtype` widget so old saved
+        # workflows preserve their 0.3.x behaviour without action.
+        legacy_fp8_qtype = {"fp8_e4m3fn": "qfloat8",
+                            "fp8_e5m2": "qfloat8_e5m2"}.get(dtype)
+        effective_mode = dit_weight_mode
+        if effective_mode == "auto":
+            effective_mode = ("fp8_runtime_experimental"
+                              if legacy_fp8_qtype is not None
+                              else "bf16_shards")
+
+        # Compute dtype is BF16 for every FP8-related mode (UniVidX
+        # constructs the pipeline at BF16 regardless; quantization /
+        # FP8 dequant happen on top). Only the BF16/FP16 shard path
+        # honours dtype=float16.
+        if effective_mode == "bf16_shards" and dtype == "float16":
+            compute_dtype = torch.float16
+        else:
+            compute_dtype = torch.bfloat16
+
+        # Wire the runtime kwargs by mode.
+        runtime_kwargs = dict(
+            device="cuda",
+            dtype=compute_dtype,
+            vram_buffer=float(vram_buffer_gb),
+            compile_dit=bool(compile_dit),
+            prefer_sage_attn=bool(prefer_sage_attn),
+            dit_weight_mode=effective_mode,
+            quantize_fp8=None,
+        )
+
+        if effective_mode == "fp8_prequantized":
+            # B3 implements the pre-quantized Kijai FP8 loader. Until
+            # that lands, refuse loudly so users (and the test suite)
+            # see a clear contract rather than a silent fallback.
+            raise NotImplementedError(
+                "dit_weight_mode='fp8_prequantized' is not yet implemented "
+                "(Tier B3 — pre-quantized Kijai FP8 loader pending). "
+                "Use dit_weight_mode='bf16_shards' or leave it on 'auto' "
+                "for now."
+            )
+
+        if effective_mode == "fp8_runtime_experimental":
+            # Legacy mmgp.offload.quantize path. Known to hang in cold
+            # load on Wan2.1-14B + UniVidX LoRA stack (see CHANGELOG).
+            # Keep it functional through 0.3.x with a deprecation
+            # warning; will be removed in 0.4.0 in favour of the
+            # pre-quantized path.
+            qtype = legacy_fp8_qtype or "qfloat8"  # safe default for explicit pick
+            runtime_kwargs["quantize_fp8"] = qtype
+            if legacy_fp8_qtype is not None:
+                _log.warning(
+                    "dtype=%s is DEPRECATED — routes through "
+                    "fp8_runtime_experimental (mmgp.offload.quantize "
+                    "post-pass), which is known to hang on this stack. "
+                    "Migrate to dit_weight_mode='fp8_prequantized' "
+                    "(Tier B, lands in 0.3.1+) when it's available; both "
+                    "fp8_e4m3fn and fp8_e5m2 dtype values will be removed "
+                    "in 0.4.0.",
+                    dtype,
+                )
+
+        model = load_model(variant, **runtime_kwargs)
         return ((model, variant),)

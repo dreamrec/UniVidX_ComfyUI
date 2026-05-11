@@ -76,7 +76,8 @@ def unividx_cwd():
 
 def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch.bfloat16,
                vram_buffer: float = 4.0, quantize_fp8: str | None = None,
-               compile_dit: bool = False, prefer_sage_attn: bool = False):
+               compile_dit: bool = False, prefer_sage_attn: bool = False,
+               dit_weight_mode: str = "bf16_shards"):
     """
     Load (or return from cache) UniVidIntrinsic or UniVidAlpha.
 
@@ -114,7 +115,8 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
     paths = resolve_paths(_comfy_root())
     ckpt = paths[f"univid_{variant}_ckpt"]
     cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
-                 quantize_fp8, bool(compile_dit), bool(prefer_sage_attn))
+                 quantize_fp8, bool(compile_dit), bool(prefer_sage_attn),
+                 dit_weight_mode)
 
     with _LOAD_LOCK:
         if cache_key in _MODEL_CACHE:
