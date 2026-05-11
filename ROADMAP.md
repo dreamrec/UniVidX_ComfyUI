@@ -47,15 +47,22 @@ because that's the empirically best configuration on this hardware.
 
 In priority order based on user value × implementation cost:
 
-### Tier C — Step-distill LoRA stacking (LightX2V)
+### ~~Tier C — Step-distill LoRA stacking (LightX2V)~~ **SHIPPED in 0.5.0**
 
-3-4 days; **HIGH quality validation risk per modality**.
+See CHANGELOG `0.5.0` for the full measurement set + framing.
+Headline outcome: **`FP8 + distill = 4.59 min wall, 3.15× speedup vs old
+PRODUCTION**. PSNR ~22-26 dB vs BF16 (visibly different decompositions,
+but plausible content). Ships as **fast preview / iteration mode**,
+NOT as a production replacement for the FP8 baseline.
+
+Original Tier C analysis below for archive purposes:
 
 LightX2V's
-[`Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors`](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v)
-is a Wan2.1-trained distill LoRA targeting 4-step + cfg=1 inference.
-Our complication: it must be active GLOBALLY on top of UniVidX's
-4 per-modality LoRA adapters.
+[`Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors`](https://huggingface.co/lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v)
+(note: rank 64, not 32 as originally claimed) is a Wan2.1-trained
+distill LoRA targeting 4-step + cfg=1 inference. Our complication:
+it must be active GLOBALLY on top of UniVidX's 4 per-modality LoRA
+adapters.
 
 Approach (per `docs/history/ROADMAP_v0.3.md` § Tier C, still valid):
 1. Compatibility scanner (`examples/_scan_lightx2v_compat.py`):

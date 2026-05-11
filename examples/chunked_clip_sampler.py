@@ -18,16 +18,20 @@ Usage:
         --output-dir C:/path/to/output \\
         --preset FP8_PREVIEW
 
-Presets:
-    PRODUCTION       BF16 + sage + 20 steps         ~14.5 min/chunk
-    FP8              FP8 + 20 steps (no sage)        ~9.4 min/chunk
-    FP8_SAGE         FP8 + sage + 20 steps          ~11.75 min/chunk
-    PREVIEW          BF16 + sage + 4 steps cfg=1     ~1.4 min/chunk
-    FP8_PREVIEW      FP8 + 4 steps cfg=1             ~1.2 min/chunk
+Presets (measured 0.5.0):
+    FP8                  FP8 + 20 steps cfg=5            9.43 min/chunk   (production quality)
+    FP8_DISTILL_PREVIEW  FP8 + lightx2v + 4 steps cfg=1  4.59 min/chunk   (3.15x faster, ~22-26 dB PSNR vs BF16)
+    PRODUCTION           BF16 + sage + 20 steps         14.48 min/chunk  (legacy, slower)
+    FP8_SAGE             FP8 + sage + 20 steps          11.75 min/chunk  (legacy)
+    PREVIEW              BF16 + sage + 4 steps cfg=1     6.20 min/chunk  (legacy)
+    FP8_PREVIEW          FP8 + 4 steps cfg=1             6.20 min/chunk  (legacy; pre-distill)
 
-Wall-time estimate: total_frames / 16 (effective frames per chunk after
-overlap) × per-chunk wall. For 1 min @ 24 fps (1440 frames) with
-FP8_PREVIEW: ~90 chunks × 1.2 min = ~1.8 hours.
+Wall-time estimate: ~total_chunks × per-chunk wall (after first chunk's
+cold-load, subsequent chunks share cache key for instant reload).
+
+For 1 min @ 24 fps (1440 frames, ~90 chunks):
+    FP8                 ~14 hours    (production quality finals)
+    FP8_DISTILL_PREVIEW  ~4.4 hours  (fast iteration; 3.15x faster)
 
 LRU model cache (introduced in commit 47162ab) ensures the cold-load
 happens ONCE; subsequent chunks share the same cache key and are pure
@@ -55,16 +59,53 @@ COMFY_OUTPUT = Path("C:/Users/dr5090/Documents/ComfyUI/output")
 # Map our preset names onto the loader/sampler settings the workflow
 # templates expect.
 PRESETS: dict[str, dict] = {
-    "PRODUCTION":   {"loader": {"prefer_sage_attn": True,  "dit_weight_mode": "bf16_shards"},
-                      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0}},
-    "FP8":          {"loader": {"prefer_sage_attn": False, "dit_weight_mode": "fp8_prequantized"},
-                      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0}},
-    "FP8_SAGE":     {"loader": {"prefer_sage_attn": True,  "dit_weight_mode": "fp8_prequantized"},
-                      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0}},
-    "PREVIEW":      {"loader": {"prefer_sage_attn": True,  "dit_weight_mode": "bf16_shards"},
-                      "sampler": {"num_inference_steps": 4,  "cfg_scale": 1.0}},
-    "FP8_PREVIEW":  {"loader": {"prefer_sage_attn": False, "dit_weight_mode": "fp8_prequantized"},
-                      "sampler": {"num_inference_steps": 4,  "cfg_scale": 1.0}},
+    # Production (0.4.0 default) — best quality, slowest. Use for final
+    # deliverables.
+    "FP8": {
+        "loader": {"prefer_sage_attn": False,
+                   "dit_weight_mode": "fp8_prequantized",
+                   "step_distill_lora": "none"},
+        "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
+    },
+    # Fast preview (0.5.0 NEW) — FP8 + LightX2V step distill at 4 steps
+    # cfg=1. 3.15x faster than old PRODUCTION; ~22-26 dB PSNR vs BF16
+    # reference (visibly different but plausible decompositions). Use
+    # for iteration loops and long-clip processing.
+    "FP8_DISTILL_PREVIEW": {
+        "loader": {"prefer_sage_attn": False,
+                   "dit_weight_mode": "fp8_prequantized",
+                   "step_distill_lora": "lightx2v",
+                   "step_distill_strength": 1.0},
+        "sampler": {"num_inference_steps": 4, "cfg_scale": 1.0},
+    },
+    # Legacy presets — kept for back-compat. The 0.5.0 measurements
+    # show sage and compile_dit are regressions on top of FP8 on this
+    # workload, but they're left here in case someone has a different
+    # config where they help.
+    "PRODUCTION": {
+        "loader": {"prefer_sage_attn": True,
+                   "dit_weight_mode": "bf16_shards",
+                   "step_distill_lora": "none"},
+        "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
+    },
+    "FP8_SAGE": {
+        "loader": {"prefer_sage_attn": True,
+                   "dit_weight_mode": "fp8_prequantized",
+                   "step_distill_lora": "none"},
+        "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
+    },
+    "PREVIEW": {
+        "loader": {"prefer_sage_attn": True,
+                   "dit_weight_mode": "bf16_shards",
+                   "step_distill_lora": "none"},
+        "sampler": {"num_inference_steps": 4, "cfg_scale": 1.0},
+    },
+    "FP8_PREVIEW": {
+        "loader": {"prefer_sage_attn": False,
+                   "dit_weight_mode": "fp8_prequantized",
+                   "step_distill_lora": "none"},
+        "sampler": {"num_inference_steps": 4, "cfg_scale": 1.0},
+    },
 }
 
 # Map a UniVidX task mode to (workflow template, output modality names).
@@ -301,7 +342,7 @@ def main() -> int:
                     choices=list(MODE_WORKFLOWS.keys()))
     ap.add_argument("--output-dir", required=True, type=Path,
                     help="Directory for stitched MP4s")
-    ap.add_argument("--preset", default="FP8_PREVIEW",
+    ap.add_argument("--preset", default="FP8_DISTILL_PREVIEW",
                     choices=list(PRESETS.keys()))
     ap.add_argument("--chunk-size", type=int, default=21)
     ap.add_argument("--overlap", type=int, default=5)

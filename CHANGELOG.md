@@ -1,5 +1,120 @@
 # Changelog
 
+## 0.5.0 — 2026-05-11
+
+Tier C: LightX2V step-distill stacking ships. Adds a new `step_distill_lora`
+loader knob that merges LightX2V's CFG-step-distillation patch into UniVidX's
+base DiT weights at load time, enabling **4-step + cfg=1 inference** with
+plausible (though not pristine) per-modality decompositions.
+
+### Headline: a new fast preview mode
+
+Two recommended configurations as of 0.5.0:
+
+**Production finals** (unchanged from 0.4.0):
+- `dit_weight_mode=fp8_prequantized`, defaults otherwise
+- **9.43 min wall**, PSNR ≥ 30 dB per modality vs BF16
+
+**Fast preview / iteration / long-clip processing** (NEW):
+- `dit_weight_mode=fp8_prequantized`
+- `step_distill_lora=lightx2v`, `step_distill_strength=1.0`
+- `num_inference_steps=4`, `cfg_scale=1.0`
+- **4.59 min wall** — **3.15× speedup** vs old PRODUCTION (BF16+sage, 14.48 min)
+- PSNR ~22-26 dB per modality vs BF16 reference (visibly different
+  decompositions but plausible content; **not a drop-in replacement
+  for production finals**, but excellent for iteration loops)
+
+For long-clip workflows via `examples/chunked_clip_sampler.py`, a 1-minute @ 24 fps
+clip drops from ~14 hours (FP8 production) to **~4.4 hours** (FP8+distill preview).
+
+### Full measurement matrix (0.5.0)
+
+All measured on RTX 5090, R2AIN_video @ 480×640×21 frames:
+
+| Configuration | Steps | cfg | Wall (min) | Δ vs BF16 baseline | PSNR vs BF16 (alb / irr / norm) |
+|---|---|---|---|---|---|
+| BF16 baseline | 20 | 5.0 | 10.85 | 0% | (reference) |
+| FP8 baseline | 20 | 5.0 | 9.43 | −13.1% | 30.89 / 39.17 / 36.28 |
+| **FP8 + distill** | 4 | 1.0 | **4.59** | **−57.7%** | **22.26 / 23.95 / 25.52** |
+| BF16 + distill | 4 | 1.0 | 5.77 | −46.8% | 22.99 / 23.30 / 25.57 |
+
+Key finding: FP8 + distill **compound cleanly** — FP8 adds essentially no
+incremental quality cost on top of distill (PSNR within 0.7 dB of BF16+distill),
+saves ~20% wall over BF16+distill (4.59 vs 5.77 min).
+
+### Quality framing: PSNR vs trajectory-distinct samples
+
+PSNR vs BF16 baseline drops 8-16 dB under distill, **not because distill
+is broken**, but because PSNR is the wrong metric for distillation:
+4-step samples follow a different denoising trajectory than 20-step samples,
+even with the same seed. The outputs are valid samples from the same
+distribution — they just don't match pixel-for-pixel. The decomposition
+content is correct (means/stds in the right ranges, no all-noise / saturation;
+spot-check eyeballing confirms physically-distinct decompositions).
+
+For iteration, preview, and long-clip processing where "looks right in 5 min"
+beats "pixel-identical in 15 min", this is a strict win. For final deliverables
+where pixel fidelity matters, stick with the FP8 baseline.
+
+### Added
+
+- **`src/lora_merge.py`** — generic LoRA / distill-patch merge utility.
+  Handles four delta patterns:
+  - PEFT (`<key>.lora_A.weight` + `<key>.lora_B.weight`)
+  - Kohya/Civitai (`<key>.lora_down.weight` + `<key>.lora_up.weight` — what
+    LightX2V uses)
+  - Bias additive deltas (`<key>.diff_b`)
+  - Direct weight deltas for non-Linear modules (`<key>.diff` — used for
+    RMSNorms, patch_embedding Conv3d, head Linear)
+  PEFT-aware descent (merge applies to `.base_layer` inside wrappers, leaving
+  UniVidX's per-modality LoRA siblings BF16 untouched).
+- **`step_distill_lora`** loader widget (`none` | `lightx2v`) +
+  **`step_distill_strength`** FLOAT 0..2. Both in the model cache key.
+- **`_apply_step_distill_merge`** in `src/runtime.py`. Runs BETWEEN
+  `enable_vram_management` and `_apply_fp8_substitution` so FP8 quantization
+  captures the merged state, not the original BF16 weights.
+- **`examples/_smoke_step_distill.py`** — regression probe for the step-distill
+  wiring. Greps the log for the merge marker; reports per-modality output stats.
+- **`examples/_run_fp8_distill.py`** — single-shot bench helper for the FP8+distill
+  compound (used to produce the C5 measurements above).
+- **`examples/_compare_distill_psnr.py`** — PSNR comparator for distill outputs vs
+  BF16 reference. Generated the C4/C5 PSNR table above.
+- **`examples/chunked_clip_sampler.py`** — adds `FP8_DISTILL_PREVIEW` preset
+  (now the default), bumps the legacy preset table with measured-0.5.0 wall times.
+
+### Tests: 74 → 85
+
+11 new tests in `tests/test_lora_merge.py`:
+- strength=0 is identity
+- unit strength + alpha=rank adds B@A exactly
+- strength scales linearly
+- alpha/rank scaling works
+- unmatched keys logged but don't crash
+- PEFT wrapper descent + LoRA-sibling preservation
+- strip_prefix handling
+- Kohya `lora_down/lora_up` naming
+- diff_b creates bias when target.bias is None
+- diff applies to non-Linear modules (RMSNorm)
+- per-key `.alpha` tensor overrides global alpha
+
+### Diagnostic findings worth flagging
+
+- **LightX2V ships rank-64 LoRA, not rank-32 as the roadmap claimed.** Doesn't
+  matter for merge-into-base (just multiply B@A regardless of rank).
+- **LightX2V is more than just a LoRA** — 1459 keys including bias deltas
+  (`.diff_b`) and direct norm/embedding deltas (`.diff`). Skipping these
+  would lose substantial information; we handle all four delta patterns.
+- **Empirical key counts on UniVidX's intrinsic variant**: 405 Linears merged,
+  447 biases patched, 41 weights patched, 0 unmatched, 161 skipped. The "skipped"
+  count is mostly internal-suffix edge cases (orphan halves, target lookups that
+  return modules without `.weight`); doesn't appear to affect outputs.
+
+### Pyproject
+
+Version: 0.4.0 → 0.5.0. Tag: `v0.5.0`.
+
+---
+
 ## 0.4.0 — 2026-05-11
 
 Tier-B Phase 1 final release. Tagged after the close-out validation

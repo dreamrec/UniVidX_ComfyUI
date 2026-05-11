@@ -66,24 +66,42 @@ hf download houyuanchen/UniVidX    --local-dir ComfyUI/models/unividx
 
 For real video-clip conditioning (your own MP4), use [`examples/R2AIN_video_api.json`](examples/R2AIN_video_api.json) (intrinsic) or [`examples/R2PFB_video_api.json`](examples/R2PFB_video_api.json) (alpha). They load 21 evenly-spaced frames from disk via `VHS_LoadVideoPath`, which means you'll also need [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) installed.
 
-## The 0.4.0 recommendation
+## Two recommendations (0.5.0)
 
-**Just set `dit_weight_mode=fp8_prequantized`.** Leave everything else default. Don't enable `prefer_sage_attn`, don't enable `compile_dit`.
+**For production finals (best quality):**
 
-That single knob gives you a measured **9.43 min wall** on the production R2AIN_video workflow vs **10.85 min BF16 baseline** — a 13% speedup AND a 50% DiT memory cut (~28 GB → ~14 GB). All other "optimizations" measured slower than plain FP8 on this hardware (see the validation matrix below).
+```
+UniVidXLoader.dit_weight_mode = fp8_prequantized
+```
 
-## Full validation matrix (0.4.0, RTX 5090, R2AIN_video @ 480×640×21×20 frames)
+Everything else default. Wall: **9.43 min** on R2AIN_video. Quality verified PSNR ≥ 30 dB per modality against BF16. Use this for anything you'd ship.
 
-| Configuration | Wall (min) | Δ vs BF16 baseline | Notes |
-|---|---|---|---|
-| **BF16 baseline** (no extras) | 10.85 | 0% | The reference point. ~28 GB DiT, vram_buffer streaming. |
-| **🏆 FP8 baseline** (just `dit_weight_mode=fp8_prequantized`) | **9.43** | **−13.1%** | **Recommended.** ~14 GB DiT fully resident; no streaming overhead. |
-| BF16 + sage | 14.48 | +33.5% | sage_attn is +33% wall on this workload; *not* the −18% advertised by 0.2.0 |
-| FP8 + sage | 11.75 | +8.3% | sage compounds with FP8 negatively too |
-| FP8 + compile_dit | 11.65 | +7.4% | torch.compile graph-captures cleanly on FP8Linear but doesn't help; +~90 s graph capture amortized over 20 steps |
-| FP8 alpha variant (R2PFB) | 12.36 | +14% | Different CMSA pattern; slightly slower than intrinsic variant, but works correctly |
-| FP8 PREVIEW + sage (4 steps cfg=1) | 6.20 | (different config) | Short-step preview path; cold-load dominates wall |
-| FP8 text-only tiny (t2RAIN 256×256×5×3) | 4.66 | (different config) | Tiny smoke test config |
+**For iteration / long-clip processing (fast):**
+
+```
+UniVidXLoader.dit_weight_mode    = fp8_prequantized
+UniVidXLoader.step_distill_lora  = lightx2v
+UniVidXLoader.step_distill_strength = 1.0
+UniVidXSampler.num_inference_steps = 4
+UniVidXSampler.cfg_scale           = 1.0
+```
+
+Wall: **4.59 min** on R2AIN_video — **3.15× faster than 0.3.x PRODUCTION**, 2× faster than 0.4.0 FP8 alone. Quality is ~22-26 dB PSNR vs BF16 — visibly different decompositions but plausible content. **Use this for iteration loops, long-clip processing (with `chunked_clip_sampler.py`), or anywhere "fast and pretty good" beats "slow and pristine."** Don't ship this output as a final deliverable without an eye check.
+
+## Full performance matrix (0.5.0, RTX 5090, R2AIN_video @ 480×640×21 frames)
+
+| Configuration | Steps | cfg | Wall (min) | Δ vs BF16 baseline | Notes |
+|---|---|---|---|---|---|
+| **BF16 baseline** (no extras) | 20 | 5.0 | 10.85 | 0% | The reference point. ~28 GB DiT, vram_buffer streaming. |
+| **🏆 FP8 baseline** (`dit_weight_mode=fp8_prequantized`) | 20 | 5.0 | **9.43** | **−13.1%** | **Production default.** ~14 GB DiT fully resident. |
+| **🚀 FP8 + distill (lightx2v)** | 4 | 1.0 | **4.59** | **−57.7%** | **Fast preview / iteration.** 3.15× vs old PRODUCTION. Quality ~22-26 dB PSNR. |
+| BF16 + distill (lightx2v) | 4 | 1.0 | 5.77 | −46.8% | FP8 strictly better than BF16 under distill too. |
+| BF16 + sage | 20 | 5.0 | 14.48 | +33.5% | sage_attn is +33% wall on this workload; *not* the −18% advertised by 0.2.0. |
+| FP8 + sage | 20 | 5.0 | 11.75 | +8.3% | sage compounds with FP8 negatively. |
+| FP8 + compile_dit | 20 | 5.0 | 11.65 | +7.4% | Graph-captures cleanly on FP8Linear but no per-step speedup on top of FP8's residency. |
+| FP8 alpha (R2PFB) | 20 | 5.0 | 12.36 | +14% | Alpha variant works; slightly slower than intrinsic. |
+| FP8 PREVIEW + sage | 4 | 1.0 | 6.20 | (different config) | Cold-load dominates short runs. |
+| FP8 text-only tiny (t2RAIN 256×256×5×3) | 3 | 5.0 | 4.66 | (different config) | Tiny smoke baseline. |
 
 ### Quality (FP8 vs BF16, R2AIN_video, same seed, 21 frames)
 
@@ -114,25 +132,38 @@ How it works under the hood: after UniVidX's standard BF16 cold-load, the loader
 UniVidX is trained at 21 frames per inference. For source clips longer than ~1 second, use `examples/chunked_clip_sampler.py` — it slices your source into overlapping 21-frame windows, runs UniVidX on each, and stitches the per-modality outputs into 4 MP4s with a linear crossfade across the overlap.
 
 ```bash
+# Fast iteration / preview: ~4.4 hours per 1 min @ 24 fps clip
 python examples/chunked_clip_sampler.py \
     --input  C:/path/to/your_clip.mp4 \
     --mode   R2AIN \
     --output-dir  C:/path/to/output \
-    --preset FP8        # fastest at production quality; ~14 hours per 1 min @ 24fps
-    # other presets: PRODUCTION, FP8_SAGE, PREVIEW, FP8_PREVIEW
+    --preset FP8_DISTILL_PREVIEW    # default in 0.5.0
+
+# Production finals: ~14 hours per 1 min @ 24 fps clip
+python examples/chunked_clip_sampler.py \
+    --input  C:/path/to/your_clip.mp4 \
+    --mode   R2AIN \
+    --output-dir  C:/path/to/output \
+    --preset FP8
 ```
 
 Wall-time guide for a 1-minute @ 24 fps clip (1440 frames → 90 chunks):
 
-| Preset | Per-chunk | Full clip |
-|---|---|---|
-| PRODUCTION (BF16+sage) | 14.5 min | ~22 hours |
-| **FP8** | **9.4 min** | **~14 hours** ← production-quality |
-| FP8 PREVIEW (4 steps) | ~1.2 min* | **~1.8 hours** ← fastest reasonable |
-
-*PREVIEW per-chunk wall includes cold-load; in-cache subsequent chunks are faster.
+| Preset | Per-chunk | Full clip | Quality |
+|---|---|---|---|
+| **FP8_DISTILL_PREVIEW** *(0.5.0 default)* | **4.59 min** | **~4.4 hours** | ~22-26 dB PSNR vs BF16; iteration / preview |
+| FP8 | 9.43 min | ~14 hours | Production-quality finals (PSNR ≥ 30 dB) |
+| PRODUCTION (legacy: BF16+sage) | 14.48 min | ~22 hours | Same quality as FP8 baseline, slower |
 
 Caveat: each chunk samples from its own noise seed (same seed across chunks, but the trajectory diverges anyway from per-chunk numerical drift), so global identity drift between chunks is possible on lighting-varying content. The overlap crossfade hides per-pixel seams but not global drift. For clips with consistent lighting throughout the minute, drift is minor; for clips with cuts or lighting changes, expect visible breath in the per-modality channels at chunk boundaries.
+
+The `FP8_DISTILL_PREVIEW` preset requires `lightx2v` LoRA at `models/loras/lightx2v/loras/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors`. Download:
+
+```bash
+hf download lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v \
+    loras/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors \
+    --local-dir ComfyUI/models/loras/lightx2v
+```
 
 ## What stopped helping on Blackwell
 
