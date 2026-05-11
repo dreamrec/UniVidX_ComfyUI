@@ -64,19 +64,30 @@ ComfyUI custom nodes for [UniVidX](https://houyuanchen111.github.io/UniVidX.gith
 - You want generic Wan2.1/2.2 T2V or I2V (just RGB out, not decomposition).
 - You need finer-grained per-block CPU swap, async prefetch, or kijai-curated FP8/GGUF Wan checkpoints. Their wrapper has more model-management surface; ours has the UniVidX-specific decomposition head.
 
-## Visual tour
+## See it move — `R2AIN` intrinsic decomposition
 
-### Flagship workflow — `t2RAIN`, text → all four intrinsic modalities
+A 21-frame portrait clip in. Three physically-grounded decompositions out, plus a clean normal map — all from one ComfyUI graph. FP8 prequantized DiT, **11.61 minutes** wall on an RTX 5090 *(20 steps · cfg 5.0 · seed 42 · the production preset)*.
+
+<table>
+  <tr>
+    <td align="center" width="50%"><b>① RGB input</b><br><sub>the conditioning clip</sub><br><img src="assets/results/demo_rgb.gif" width="100%" alt="RGB input frames"></td>
+    <td align="center" width="50%"><b>② Albedo</b><br><sub>lighting stripped — pure surface color</sub><br><img src="assets/results/demo_albedo.gif" width="100%" alt="Albedo decomposition"></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><b>③ Irradiance</b><br><sub>incoming light field, soft &amp; smooth</sub><br><img src="assets/results/demo_irradiance.gif" width="100%" alt="Irradiance field"></td>
+    <td align="center" width="50%"><b>④ Normal</b><br><sub>encoded surface orientation</sub><br><img src="assets/results/demo_normal.gif" width="100%" alt="Normal map"></td>
+  </tr>
+</table>
+
+This is the **`R2AIN` task mode** of the **intrinsic** variant: one conditioning RGB clip, three target decompositions in a single pass. The **albedo** is lighting-independent surface color — relight the scene by swapping the irradiance and re-multiplying. The **normal map** is physically-meaningful surface orientation, usable as ControlNet conditioning for any downstream video/image model that consumes normals. Every frame above was emitted by UniVidX itself; no compositing tricks. Reproduce: `examples/_gif_demo_runner.py`.
+
+### Flagship workflow — five nodes end-to-end
 
 ![t2RAIN workflow](assets/workflow_t2RAIN.png)
 
-### Intrinsic decomposition
+Drag-and-drop ready: `Loader → TaskMode → Sampler → Decode → Save`. The same five-node shape works for `t2RAIN` (text-only), `R2AIN` (the demo above), or any of the other 28 task modes — pick your mode in the `TaskMode` node, the sampler validates required inputs and routes accordingly.
 
-![Intrinsic quad](assets/results/LTX_intrinsic_quad.jpg)
-
-A 21-frame portrait clip conditioned on RGB (mode `R2AIN`). UniVidX strips the candlelight from the **albedo**, isolates the soft incoming **irradiance** field, and emits a clean **normal map** of the face. The decoder's RGB slot is a black placeholder (RGB was the input); we paste the conditioning frame back in here for legibility.
-
-### Alpha decomposition
+### Alpha decomposition (same clip, alpha variant)
 
 ![Alpha quad](assets/results/LTX_alpha_quad.jpg)
 
