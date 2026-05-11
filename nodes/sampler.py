@@ -43,7 +43,18 @@ class UniVidXSampler:
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
                 "negative_prompt": ("STRING", {"multiline": True,
                                                 "default": DEFAULT_NEGATIVE_PROMPT}),
-                "num_inference_steps": ("INT", {"default": 50, "min": 1, "max": 200}),
+                "num_inference_steps": ("INT", {
+                    "default": 20, "min": 1, "max": 200,
+                    "tooltip": (
+                        "Number of denoising steps. UniVidX is trained "
+                        "at 20 (production preset). With "
+                        "step_distill_lora=lightx2v on the loader + "
+                        "cfg_scale=1.0, use 4 (the fast-preview preset, "
+                        "~5x faster wall, ~22-26 dB PSNR vs production "
+                        "reference). 50+ rarely helps and usually hurts "
+                        "on this model."
+                    ),
+                }),
                 "cfg_scale": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0,
                                          "step": 0.1}),
                 "denoising_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0,

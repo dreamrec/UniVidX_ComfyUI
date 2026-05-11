@@ -58,7 +58,16 @@ VARIANTS = [
 def build(cfg: dict) -> dict:
     return {
         "1": {"class_type": "UniVidXLoader",
-              "inputs": {"variant": cfg["variant"], "dtype": "bfloat16"}},
+              "inputs": {
+                  "variant": cfg["variant"],
+                  "dtype": "bfloat16",
+                  # 0.5.0 default: FP8 prequantized. ~13% faster than BF16
+                  # on RTX 5090 (9.43 min vs 10.85 min on this workflow),
+                  # 50% lower DiT VRAM, PSNR >= 30 dB per modality vs BF16
+                  # reference. Set to "bf16_shards" if you want the 0.3.x
+                  # baseline behavior. See README for the full perf matrix.
+                  "dit_weight_mode": "fp8_prequantized",
+              }},
         "2": {"class_type": "UniVidXTaskMode",
               "inputs": {"mode": cfg["mode"]}},
         "3": {"class_type": "VHS_LoadVideoPath",

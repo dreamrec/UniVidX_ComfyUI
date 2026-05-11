@@ -2,6 +2,8 @@
 
 Drag-and-drop ready ComfyUI workflows for UniVidX. Each `*.json` is a UI workflow you can drop onto the canvas; each `*_api.json` is the matching programmatic-queue payload (regenerate with `_build_ui_workflows.py` after editing).
 
+> **As of 0.5.0**, all shipped workflows default to `dit_weight_mode=fp8_prequantized` — the FP8 path that gives a 13% wall-time speedup and 50% DiT VRAM cut on RTX 5090. Set the widget to `bf16_shards` if you want the 0.3.x baseline behavior. See the [main README](../README.md) for the full perf matrix.
+
 > **Before you queue anything:** make sure both model packs are downloaded — see [Model setup](#model-setup) below. Without them, the loader node raises `MissingModelFile` at startup.
 
 ## Quick start
@@ -11,25 +13,57 @@ Drag-and-drop ready ComfyUI workflows for UniVidX. Each `*.json` is a UI workflo
 hf download Wan-AI/Wan2.1-T2V-14B  --local-dir ComfyUI/models/wan21_t2v_14b
 hf download houyuanchen/UniVidX    --local-dir ComfyUI/models/unividx
 
-# 2. open ComfyUI in your browser, drag any *.json from this folder onto the canvas
-# 3. queue it — the first run takes ~3 min cold-load + sampling time
+# 2. (optional, 0.5.0+) download the LightX2V distill LoRA for the
+#    fast-preview mode (4-step + cfg=1, ~5 min/chunk):
+hf download lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill-Lightx2v \
+    loras/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank64.safetensors \
+    --local-dir ComfyUI/models/loras/lightx2v
+
+# 3. open ComfyUI in your browser, drag any *.json from this folder onto the canvas
+# 4. queue it — the first run takes ~2-3 min cold-load + sampling time
 ```
 
 ## Workflow catalogue
 
+Wall times measured on RTX 5090 (32 GB), R2AIN_video @ 480×640×21 frames, 20 steps, with the 0.5.0 default loader settings (`dit_weight_mode=fp8_prequantized`).
+
 | File | Mode | Variant | Inputs | Targets | Wall time¹ |
 |---|---|---|---|---|---|
-| [`t2RAIN_basic.json`](t2RAIN_basic.json) | `t2RAIN` | intrinsic | text | RGB + Albedo + Irradiance + Normal | ~10 min |
+| [`t2RAIN_basic.json`](t2RAIN_basic.json) | `t2RAIN` | intrinsic | text | RGB + Albedo + Irradiance + Normal | ~9-10 min |
 | [`t2RAIN_tiny_api.json`](t2RAIN_tiny_api.json) | `t2RAIN` | intrinsic | text | RGB + Albedo + Irradiance + Normal | ~2 min |
-| [`R2AIN_video_api.json`](R2AIN_video_api.json) | `R2AIN` | intrinsic | RGB **video clip** via `VHS_LoadVideoPath` | Albedo + Irradiance + Normal | ~10 min |
-| [`t2RPFB_basic.json`](t2RPFB_basic.json) | `t2RPFB` | alpha | text | Composite + Pha + Fgr + Bgr | ~10 min |
-| [`R2PFB_video_api.json`](R2PFB_video_api.json) | `R2PFB` | alpha | RGB **video clip** via `VHS_LoadVideoPath` | Pha + Fgr + Bgr | ~10 min |
-| [`I_video_output.json`](I_video_output.json) | `t2RAIN` | intrinsic | text | 4× MP4 via VHS_VideoCombine | ~10 min |
-| [`J_alpha_compositing.json`](J_alpha_compositing.json) | `R2PFB` | alpha | RGB still | Composited PNG | ~10 min |
+| [`R2AIN_video_api.json`](R2AIN_video_api.json) | `R2AIN` | intrinsic | RGB **video clip** via `VHS_LoadVideoPath` | Albedo + Irradiance + Normal | **9.43 min** *(measured)* |
+| [`t2RPFB_basic.json`](t2RPFB_basic.json) | `t2RPFB` | alpha | text | Composite + Pha + Fgr + Bgr | ~10-12 min |
+| [`R2PFB_video_api.json`](R2PFB_video_api.json) | `R2PFB` | alpha | RGB **video clip** via `VHS_LoadVideoPath` | Pha + Fgr + Bgr | **12.36 min** *(measured)* |
+| [`I_video_output.json`](I_video_output.json) | `t2RAIN` | intrinsic | text | 4× MP4 via VHS_VideoCombine | ~9-10 min |
+| [`J_alpha_compositing.json`](J_alpha_compositing.json) | `R2PFB` | alpha | RGB still | Composited PNG | ~10-12 min |
 
 > **The `_video_` workflows** are the canonical RGB-conditioned demos. They load 21 evenly-spaced frames from an MP4 via `VHS_LoadVideoPath` and feed them as conditioning into UniVidX. **Edit node 3's `video` field to point at your own MP4** — VHS requires an absolute path on this build (`Invalid file path` error otherwise). Both workflows require [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite).
 
-¹ Wall time on RTX 5090 (32 GB), bfloat16, 480×640×21 frames × 20 steps. Add ~3 min for the first cold load per session — subsequent runs hit the model cache. The `_tiny_` variant uses 256×256 × 5 frames × 3 steps for fast smoke tests.
+¹ First run in a session adds ~2-3 min for cold-load + FP8 quantization walk. Subsequent runs hit the model cache and skip both. The `_tiny_` variant uses 256×256 × 5 frames × 3 steps for fast smoke tests.
+
+## Processing clips longer than 21 frames
+
+UniVidX is trained at 21 frames per inference. For source clips longer than ~1 second, use the **chunked sampler driver**:
+
+```bash
+# Fast preview / iteration (FP8 + LightX2V step-distill, 4 steps cfg=1)
+# 1 min @ 24 fps clip → ~4.4 hours
+python examples/chunked_clip_sampler.py \
+    --input  C:/path/to/your_clip.mp4 \
+    --mode   R2AIN \
+    --output-dir  C:/path/to/output \
+    --preset FP8_DISTILL_PREVIEW    # default in 0.5.0
+
+# Production finals (FP8, 20 steps cfg=5)
+# 1 min @ 24 fps clip → ~14 hours
+python examples/chunked_clip_sampler.py \
+    --input  C:/path/to/your_clip.mp4 \
+    --mode   R2AIN \
+    --output-dir  C:/path/to/output \
+    --preset FP8
+```
+
+The driver slices your source into overlapping 21-frame windows, runs UniVidX on each, and stitches the per-modality outputs into 4 MP4s with a linear crossfade across the overlap. See the [main README's "Processing longer clips"](../README.md#processing-longer-clips-chunked-sampler) section for the full preset table + quality caveats.
 
 ### `t2RAIN_basic.json` — Text → all four intrinsic modalities
 
@@ -137,8 +171,8 @@ The bundled `python install.py` creates a Windows directory junction (or POSIX s
 - **`MissingModelFile` at startup** — re-run the `hf download` commands. The path resolver lists the exact missing file.
 - **`R2AIN` `rgb` output is black** — that's correct. `R2AIN` uses RGB as input, so the decoder's `rgb` slot returns a black placeholder of the right shape (so downstream nodes don't break on a missing key).
 - **Text-only alpha matte (`t2RPFB`) comes out white** — known model limitation, not a bug. Use `R2PFB_video_api.json` instead and feed a video clip.
-- **OOM on a 24 GB GPU** — bump the VRAM buffer to 8 GB in `src/runtime.py` (search for `vram_buffer=4.0`), or lower `num_frames` / `height` / `width` in the sampler widget.
-- **Per-step time > 1 min on a ≥32 GB GPU** — VRAM management didn't activate. Verify GPU temp during sampling — if it stays under 60°C with 99% util, the run is memory-bound. See the README's [Performance & VRAM](../README.md#performance--vram) section.
+- **OOM on a 24 GB GPU** — make sure `dit_weight_mode=fp8_prequantized` on the loader (drops DiT from ~28 GB to ~14 GB). If you're already on FP8 and still OOM, raise `vram_buffer_gb` to 8 in the loader widget, or lower `num_frames` / `height` / `width` in the sampler.
+- **Per-step time > 1 min on a ≥32 GB GPU** — VRAM management didn't activate (or you're on the BF16 path without it). Switch the loader to `dit_weight_mode=fp8_prequantized` — the FP8 DiT fits fully resident on a 32 GB card so layer streaming isn't needed. See the [main README perf matrix](../README.md#full-performance-matrix-050-rtx-5090-r2ain_video--480640214-frames).
 - **First run takes 3-5 min before sampling starts** — that's the cold model load (28 GB DiT + LoRA attachment). Subsequent runs in the same ComfyUI session hit the cache and skip this.
 - **Switching between `intrinsic` and `alpha` reloads the model** — the cache is keyed per-variant. Group your runs by variant if you have many to do.
 - **Resolution / frame count is rigid** — Wan2.1 was trained at `480×640` (intrinsic) and `432×768` (alpha) with 21 frames. Other sizes work but quality drifts. The sampler caps at 81 frames in steps of 4.

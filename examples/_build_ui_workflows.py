@@ -376,7 +376,14 @@ def sampler_widgets(prompt: str = PROMPT, neg: str = NEG_PROMPT,
 
 def workflow_t2RAIN_basic() -> dict:
     setup = GroupSpec("Model Setup", COLOR_SETUP, [
-        make_node("UniVidXLoader",   "loader", ["intrinsic", "bfloat16"]),
+        # widget order in INPUT_TYPES: variant, dtype, compile_dit,
+        # prefer_sage_attn, vram_buffer_gb, step_distill_lora,
+        # step_distill_strength, dit_weight_mode. 0.5.0 default ships
+        # dit_weight_mode='fp8_prequantized' for the 13% speedup + 50%
+        # DiT VRAM cut. Flip to 'bf16_shards' for the 0.3.x baseline.
+        make_node("UniVidXLoader", "loader",
+                  ["intrinsic", "bfloat16",
+                   False, False, 4.0, "none", 1.0, "fp8_prequantized"]),
         make_node("UniVidXTaskMode", "task",   ["t2RAIN"]),
     ])
     sampling = GroupSpec("Sampling", COLOR_SAMPLE, [
@@ -409,7 +416,9 @@ def workflow_t2RAIN_basic() -> dict:
 
 def workflow_t2RPFB_basic() -> dict:
     setup = GroupSpec("Model Setup", COLOR_SETUP, [
-        make_node("UniVidXLoader",   "loader", ["alpha", "bfloat16"]),
+        make_node("UniVidXLoader", "loader",
+                  ["alpha", "bfloat16",
+                   False, False, 4.0, "none", 1.0, "fp8_prequantized"]),
         make_node("UniVidXTaskMode", "task",   ["t2RPFB"]),
     ])
     sampling = GroupSpec("Sampling", COLOR_SAMPLE, [
@@ -443,7 +452,14 @@ def workflow_t2RPFB_basic() -> dict:
 
 def workflow_I_video_output() -> dict:
     setup = GroupSpec("Model Setup", COLOR_SETUP, [
-        make_node("UniVidXLoader",   "loader", ["intrinsic", "bfloat16"]),
+        # widget order in INPUT_TYPES: variant, dtype, compile_dit,
+        # prefer_sage_attn, vram_buffer_gb, step_distill_lora,
+        # step_distill_strength, dit_weight_mode. 0.5.0 default ships
+        # dit_weight_mode='fp8_prequantized' for the 13% speedup + 50%
+        # DiT VRAM cut. Flip to 'bf16_shards' for the 0.3.x baseline.
+        make_node("UniVidXLoader", "loader",
+                  ["intrinsic", "bfloat16",
+                   False, False, 4.0, "none", 1.0, "fp8_prequantized"]),
         make_node("UniVidXTaskMode", "task",   ["t2RAIN"]),
     ])
     sampling = GroupSpec("Sampling", COLOR_SAMPLE, [
@@ -477,7 +493,9 @@ def workflow_I_video_output() -> dict:
 
 def workflow_J_alpha_compositing() -> dict:
     setup = GroupSpec("Model Setup", COLOR_SETUP, [
-        make_node("UniVidXLoader",   "loader", ["alpha", "bfloat16"]),
+        make_node("UniVidXLoader", "loader",
+                  ["alpha", "bfloat16",
+                   False, False, 4.0, "none", 1.0, "fp8_prequantized"]),
         make_node("UniVidXTaskMode", "task",   ["R2PFB"]),
     ])
     cond = GroupSpec("RGB Conditioning", COLOR_INPUT, [
@@ -607,7 +625,15 @@ def _ui_to_api(ui: dict) -> dict:
         # Inline widget values (these are positional but ComfyUI's API format is
         # by-name, so we need to consult each node type's widget order)
         widget_names = {
-            "UniVidXLoader":          ["variant", "dtype"],
+            # Order must match INPUT_TYPES in nodes/loader.py: required
+            # widgets first (variant, dtype), then optional widgets in the
+            # order they appear in the `optional` dict.
+            "UniVidXLoader":          ["variant", "dtype",
+                                        "compile_dit", "prefer_sage_attn",
+                                        "vram_buffer_gb",
+                                        "step_distill_lora",
+                                        "step_distill_strength",
+                                        "dit_weight_mode"],
             "UniVidXTaskMode":        ["mode"],
             "UniVidXSampler":         ["prompt", "negative_prompt", "num_inference_steps",
                                        "cfg_scale", "denoising_strength", "num_frames",

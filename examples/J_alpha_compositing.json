@@ -34,7 +34,13 @@
       },
       "widgets_values": [
         "alpha",
-        "bfloat16"
+        "bfloat16",
+        false,
+        false,
+        4.0,
+        "none",
+        1.0,
+        "fp8_prequantized"
       ]
     },
     {

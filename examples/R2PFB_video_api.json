@@ -3,7 +3,8 @@
     "class_type": "UniVidXLoader",
     "inputs": {
       "variant": "alpha",
-      "dtype": "bfloat16"
+      "dtype": "bfloat16",
+      "dit_weight_mode": "fp8_prequantized"
     }
   },
   "2": {
