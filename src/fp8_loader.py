@@ -220,6 +220,22 @@ def load_fp8_state_dict_into(model: nn.Module, state_dict: dict) -> dict:
                 old = parent[int(leaf)]  # type: ignore[index]
             except (IndexError, TypeError):
                 pass
+
+        # PEFT descent: after UniVidX wires per-modality LoRAs via
+        # add_multiple_loras_to_model(), each target Linear is wrapped
+        # in peft.tuners.lora.Linear (or similar) holding the real
+        # nn.Linear at `.base_layer`. We descend into the wrapper and
+        # replace the BASE layer in-place; the LoRA adapters above
+        # stay untouched (B5: LoRA stays BF16).
+        peft_wrapper: Optional[nn.Module] = None
+        if (not isinstance(old, nn.Linear)
+                and not isinstance(old, FP8Linear)
+                and hasattr(old, "base_layer")
+                and isinstance(getattr(old, "base_layer"),
+                               (nn.Linear, FP8Linear))):
+            peft_wrapper = old
+            old = old.base_layer
+
         if not isinstance(old, nn.Linear):
             # Already replaced? Idempotent: load into existing FP8Linear.
             if isinstance(old, FP8Linear):
@@ -234,7 +250,10 @@ def load_fp8_state_dict_into(model: nn.Module, state_dict: dict) -> dict:
                 out_features=old.out_features,
                 bias=(old.bias is not None),
             ).to(device)
-            _set_child(parent, leaf, new)
+            if peft_wrapper is not None:
+                peft_wrapper.base_layer = new
+            else:
+                _set_child(parent, leaf, new)
 
         device = new.weight.device
         new.weight.data = state_dict[fp8_key].to(device)
