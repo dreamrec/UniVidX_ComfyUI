@@ -52,6 +52,71 @@ def test_resolve_paths_raises_when_t5_missing(tmp_path):
         resolve_paths(str(comfy_root))
 
 
+def test_resolve_paths_variant_only_requires_matching_ckpt(tmp_path):
+    """When ``variant`` is set, only the matching UniVidX checkpoint
+    must be present; the other can be absent without raising. This
+    lets users download a single variant's ~0.8 GB weights without
+    needing both."""
+    comfy_root = tmp_path / "ComfyUI"
+    wan_dir = comfy_root / "models" / "wan21_t2v_14b"
+    univ_dir = comfy_root / "models" / "unividx"
+    for i in range(1, 7):
+        _touch(wan_dir / f"diffusion_pytorch_model-0000{i}-of-00006.safetensors")
+    _touch(wan_dir / "diffusion_pytorch_model.safetensors.index.json")
+    _touch(wan_dir / "models_t5_umt5-xxl-enc-bf16.pth")
+    _touch(wan_dir / "Wan2.1_VAE.pth")
+    _touch(wan_dir / "google" / "umt5-xxl" / "spiece.model")
+    # ONLY the alpha checkpoint is on disk.
+    _touch(univ_dir / "univid_alpha.safetensors")
+
+    # variant=None (default) requires both → must raise.
+    with pytest.raises(MissingModelFile, match="univid_intrinsic"):
+        resolve_paths(str(comfy_root))
+
+    # variant="alpha" requires only the alpha ckpt → succeeds.
+    paths = resolve_paths(str(comfy_root), variant="alpha")
+    assert paths["univid_alpha_ckpt"].endswith("univid_alpha.safetensors")
+    assert paths["univid_intrinsic_ckpt"] is None
+
+    # variant="intrinsic" requires the intrinsic ckpt which is absent
+    # → raises with the right path in the message.
+    with pytest.raises(MissingModelFile, match="univid_intrinsic"):
+        resolve_paths(str(comfy_root), variant="intrinsic")
+
+
+def test_resolve_paths_rejects_unknown_variant(tmp_path):
+    """Passing a variant other than 'intrinsic' / 'alpha' / None is a
+    programmer error and must raise ValueError before any file checks
+    happen."""
+    with pytest.raises(ValueError, match="variant"):
+        resolve_paths(str(tmp_path), variant="nonsense")
+
+
+def test_ensure_symlinks_variant_skips_missing_ckpt(tmp_path):
+    """``ensure_symlinks(..., variant="alpha")`` links only the alpha
+    checkpoint and does NOT raise when intrinsic is absent."""
+    from src.path_resolver import ensure_symlinks
+
+    comfy_root = tmp_path / "ComfyUI"
+    wan_dir = comfy_root / "models" / "wan21_t2v_14b"
+    univ_dir = comfy_root / "models" / "unividx"
+    for i in range(1, 7):
+        _touch(wan_dir / f"diffusion_pytorch_model-0000{i}-of-00006.safetensors")
+    _touch(wan_dir / "diffusion_pytorch_model.safetensors.index.json")
+    _touch(wan_dir / "models_t5_umt5-xxl-enc-bf16.pth")
+    _touch(wan_dir / "Wan2.1_VAE.pth")
+    _touch(wan_dir / "google" / "umt5-xxl" / "spiece.model")
+    _touch(univ_dir / "univid_alpha.safetensors")
+
+    unividx_root = tmp_path / "vendor" / "UniVidX"
+    unividx_root.mkdir(parents=True)
+    ensure_symlinks(str(comfy_root), str(unividx_root), variant="alpha")
+
+    # Alpha was linked; intrinsic was skipped (no exception, no link).
+    assert (unividx_root / "checkpoints" / "univid_alpha.safetensors").exists()
+    assert not (unividx_root / "checkpoints" / "univid_intrinsic.safetensors").exists()
+
+
 def test_ensure_symlinks_creates_expected_links(tmp_path):
     from src.path_resolver import ensure_symlinks
 

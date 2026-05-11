@@ -246,24 +246,20 @@ class UniVidXLoader:
         )
 
         if effective_mode == "fp8_runtime_experimental":
-            # Legacy mmgp.offload.quantize path. Known to hang in cold
-            # load on Wan2.1-14B + UniVidX LoRA stack (see CHANGELOG).
-            # Keep it functional through 0.3.x with a deprecation
-            # warning; will be removed in 0.4.0 in favour of the
-            # pre-quantized path.
-            qtype = legacy_fp8_qtype or "qfloat8"  # safe default for explicit pick
-            runtime_kwargs["quantize_fp8"] = qtype
-            if legacy_fp8_qtype is not None:
-                _log.warning(
-                    "dtype=%s is DEPRECATED — routes through "
-                    "fp8_runtime_experimental (mmgp.offload.quantize "
-                    "post-pass), which is known to hang on this stack. "
-                    "Migrate to dit_weight_mode='fp8_prequantized' "
-                    "(Tier B, lands in 0.3.1+) when it's available; both "
-                    "fp8_e4m3fn and fp8_e5m2 dtype values will be removed "
-                    "in 0.4.0.",
-                    dtype,
-                )
+            # Legacy mmgp.offload.quantize() post-pass. Known to hang in
+            # cold load on Wan2.1-14B + UniVidX LoRA stack (see CHANGELOG
+            # 0.4.0). Kept as a documented escape hatch only; users hit
+            # this path solely by explicitly picking it from the
+            # dit_weight_mode dropdown — the deprecated dtype=fp8_*
+            # auto-migration above routes through `fp8_prequantized`
+            # instead. Will be removed in 0.6.0.
+            runtime_kwargs["quantize_fp8"] = "qfloat8"
+            _log.warning(
+                "dit_weight_mode='fp8_runtime_experimental' is the "
+                "legacy mmgp.offload.quantize() path and is known to "
+                "hang on this stack. Prefer 'fp8_prequantized'. This "
+                "mode will be removed in 0.6.0."
+            )
 
         model = load_model(variant, **runtime_kwargs)
         return ((model, variant),)

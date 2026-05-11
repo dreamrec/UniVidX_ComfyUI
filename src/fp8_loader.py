@@ -228,36 +228,28 @@ def quantize_dit_inplace(model: nn.Module) -> dict:
 
     def _walk(module: nn.Module) -> None:
         for name, child in list(module.named_children()):
-            # PEFT descent: if child wraps a Linear at .base_layer,
-            # replace the base_layer in place rather than the wrapper.
+            # PEFT descent: a wrapper holding a real Linear at
+            # `.base_layer` (e.g. peft.tuners.lora.Linear). Replace the
+            # base_layer in place and DO NOT recurse into the wrapper —
+            # its `lora_A` / `lora_B` siblings are nn.Linear too, but
+            # they stay BF16 per the B5 contract (LoRA adapters are
+            # rank-32; FP8-quantizing them wins no memory and hurts
+            # adapter quality).
             if (not isinstance(child, nn.Linear)
                     and not isinstance(child, FP8Linear)
                     and hasattr(child, "base_layer")
                     and isinstance(child.base_layer, nn.Linear)):
                 child.base_layer = _quantize_linear_to_fp8(child.base_layer)
                 quantized[0] += 1
-                # Recurse into the wrapper so siblings (lora_A/B) get
-                # walked too — they're nn.Linear but we don't want
-                # to quantize them. The check below filters them by
-                # name pattern... actually no, simplest: don't recurse
-                # into PEFT wrappers since their structure is fixed.
                 continue
             if isinstance(child, nn.Linear) and not isinstance(child, FP8Linear):
-                # Skip LoRA adapter linears: they live INSIDE a PEFT
-                # wrapper and we only recurse there above. If we hit
-                # one here, it's a top-level Linear in the model
-                # itself (text_embedding, time_embedding, head — the
-                # full-precision aux Linears we want to keep BF16
-                # per B5 logic).
-                # The simple rule: only quantize Linears that are
-                # PEFT base_layers OR whose name doesn't match the
-                # LoRA siblings. Here we err toward "quantize all
-                # plain Linears" because UniVidX's LoRA siblings only
-                # exist INSIDE PEFT wrappers (which we handled above).
+                # Plain top-level Linear (text_embedding / time_embedding
+                # / head). Quantize. PEFT-wrapped LoRA siblings are
+                # unreachable here — they sit inside the wrapper handled
+                # above, and the `continue` there prevents recursion.
                 module.__setattr__(name, _quantize_linear_to_fp8(child))
                 quantized[0] += 1
                 continue
-            # Recurse.
             _walk(child)
 
     _walk(model)
@@ -403,10 +395,33 @@ def load_fp8_state_dict_into(model: nn.Module, state_dict: dict) -> dict:
     # not consumed by an FP8Linear) go through the standard path.
     aux_sd = {k: state_dict[k] for k in aux_keys if k not in fp8_bias_keys}
     aux_keys_loaded = 0
+    truly_missing: list[str] = []
     if aux_sd:
         result = model.load_state_dict(aux_sd, strict=False)
         aux_keys_loaded = len(aux_sd) - len(result.unexpected_keys)
         unmatched.extend(result.unexpected_keys)
+        # `missing_keys` lists every model parameter NOT covered by
+        # `aux_sd`. The FP8-substituted Linears + biases handled
+        # earlier in this function ARE expected to appear there — they
+        # got their weights via the FP8Linear replacement path, not via
+        # `aux_sd`. Filter those out so the warning surfaces ONLY
+        # parameters the model needs that weren't covered by either
+        # path — those are the silent-zero-init regression risk that
+        # would otherwise hide bad output behind plausible numerics.
+        fp8_handled_prefixes = {k.rsplit(".weight", 1)[0] for k in fp8_keys}
+        for mk in result.missing_keys:
+            base = mk.rsplit(".weight", 1)[0].rsplit(".bias", 1)[0]
+            if base in fp8_handled_prefixes:
+                continue
+            truly_missing.append(mk)
+        if truly_missing:
+            _log.warning(
+                "FP8 loader: %d model parameter(s) missing from BOTH "
+                "the FP8 substitution and the aux state-dict — these "
+                "stay at their initialization values, which is likely "
+                "a silent-quality regression. First 5: %s",
+                len(truly_missing), truly_missing[:5],
+            )
 
     if unmatched:
         _log.warning(
@@ -418,4 +433,5 @@ def load_fp8_state_dict_into(model: nn.Module, state_dict: dict) -> dict:
         "fp8_linears_replaced": fp8_replaced,
         "aux_keys_loaded": aux_keys_loaded,
         "unmatched_keys": unmatched,
+        "missing_keys": truly_missing,
     }

@@ -1,5 +1,115 @@
 # Changelog
 
+## 0.5.2 — 2026-05-11
+
+External-audit response (second pass). Nine findings from a deep
+read-through of `v0.5.1` (commit `f644eeb`); all addressed.
+
+### Fixed (P1: shipped NameError reachable from the UI)
+
+- **`NameError: legacy_fp8_qtype` in `UniVidXLoader.load()`.** Picking
+  `dit_weight_mode='fp8_runtime_experimental'` from the loader
+  dropdown (with `dtype='bfloat16'`) raised `NameError: name
+  'legacy_fp8_qtype' is not defined` at the node entrypoint.
+  `legacy_fp8_qtype` was referenced as both a `qtype` fallback and a
+  deprecation gate but was never defined in any enclosing scope —
+  a stale artifact of an earlier refactor that the surrounding tests
+  missed because they exercised the same mode by calling
+  `runtime.load_model(...)` directly with `quantize_fp8` pre-set.
+  **Fix**: drop the dead variable; hardcode `qtype="qfloat8"` (the
+  only sensible default for this escape-hatch path) and emit a clear
+  one-line deprecation warning telling the user to migrate to
+  `fp8_prequantized` before 0.6.0. New regression test
+  `test_dit_weight_mode_fp8_runtime_experimental_through_node_does_not_raise`
+  drives the path through `UniVidXLoader().load()` so a future
+  refactor can't recreate the bug.
+
+### Fixed (P2: correctness drift)
+
+- **Sampler conditioning tensors no longer risk FP8 dtype.** The
+  sampler computed `dtype = next(model.parameters()).dtype if hasattr(...) else bfloat16`
+  to pick the dtype for converting ComfyUI IMAGE inputs to UniVidX's
+  video tensor. After FP8 substitution (~400 Linears → `FP8Linear`
+  with `weight.dtype == float8_e4m3fn`), the first parameter may be
+  FP8 depending on module iteration order, which would cast the
+  conditioning tensors to FP8 and crash at the VAE encode boundary
+  (the VAE stays BF16). UniVidX always operates the pipeline at BF16
+  regardless of DiT weight storage, so the dtype is now hardcoded to
+  `torch.bfloat16` — fragile heuristic removed.
+- **`load_fp8_state_dict_into` now logs truly-missing parameters.**
+  The file-based FP8 substitution previously dropped
+  `result.missing_keys` from the aux state-dict load on the floor.
+  Most of those are expected (FP8-handled Linears don't have BF16
+  `.weight` entries in `aux_sd`), but a parameter the model needs
+  that's covered by NEITHER the FP8 substitution nor the aux load
+  would silently stay at its init value — a quality regression
+  hidden behind plausible numerics. We now filter by FP8-handled
+  prefix and emit a WARNING listing the truly-missing parameters
+  (and include them in the diagnostic report dict under
+  `missing_keys`). Dormant path — only triggers when the upstream
+  Kijai `_scaled` Wan2.1 file lands — but the logging is in place
+  for when it does.
+- **`path_resolver` is now variant-aware.** Single-variant users
+  (only `intrinsic` OR `alpha` downloaded, not both) previously got
+  a `MissingModelFile` for the variant they didn't care about. The
+  resolver and `ensure_symlinks` now accept `variant=None`
+  (back-compat: both required) or a specific variant (only that
+  ckpt is required; the other is reported as `None` and not linked).
+  `runtime.initialize` and `runtime.load_model` thread the variant
+  through. New tests
+  `test_resolve_paths_variant_only_requires_matching_ckpt` and
+  `test_ensure_symlinks_variant_skips_missing_ckpt` pin the
+  contract.
+
+### Documented (P2-P3: stale comments)
+
+- **FP8 vram_buffer comment no longer lies about auto-zeroing.** The
+  comment block above `pipe.enable_vram_management()` claimed FP8
+  mode "drops the VRAM buffer to 0.0" — the implementation never
+  did that; the user-supplied value (loader default 4.0) was passed
+  through verbatim. Rewrote the comment to reflect reality (FP8
+  users wanting to reclaim streaming overhead can set
+  `vram_buffer_gb=0.5` themselves; auto-override would silently
+  break the bench cache-key contract).
+- **`unividx_cwd` context manager now documents single-worker
+  assumption.** `os.chdir` is process-global, so concurrent sampler
+  calls would race. ComfyUI's default worker is serial — fine for
+  every install — but the constraint is now stated in the
+  docstring instead of buried in implicit knowledge.
+
+### Added (P4: missing test coverage)
+
+- **`build_crossfade_weights` extracted from `stitch_modality` +
+  five tests.** The crossfade ramp math inside the chunked-clip
+  stitcher was only correct-by-construction; no tests pinned it.
+  Pulled the weight-vector construction out into a pure helper
+  and added tests covering single-chunk, first-chunk, last-chunk,
+  seam-weights-sum-to-one (the key invariant), and the long-overlap
+  anchor-chunk case.
+
+### Improved (P3: discoverability)
+
+- **`[project.optional-dependencies]` in `pyproject.toml`.** Added
+  `sage`, `fp8`, `fa2` extras so the loader widgets' advertised
+  functionality maps to a documented `pip install
+  unividx-comfyui[sage]` rather than a README scavenger hunt for
+  package names.
+
+### Nits
+
+- **Polished the rambly comment in `quantize_dit_inplace`.** The
+  body had a leftover stream-of-thought (`"...actually no,
+  simplest:"`) from the original PEFT-walk design. Rewritten as
+  declarative one-liners.
+- **Refreshed the stale "will be removed in 0.4.0" deprecation
+  message** in the (now-fixed) `fp8_runtime_experimental` branch —
+  we're at 0.5.2; the new removal target is 0.6.0.
+
+### Test stats
+
+- Up from 86 → 95 passing tests; full suite runs in ~1.6 s on CPU.
+- Eight new tests across path_resolver, chunk_planner, and loader.
+
 ## 0.5.1 — 2026-05-11
 
 External audit response. Six findings from a fresh repo audit of

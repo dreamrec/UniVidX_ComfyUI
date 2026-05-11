@@ -70,16 +70,31 @@ def _comfy_root() -> str:
     )
 
 
-def initialize() -> None:
-    """One-time setup: add UniVidX to sys.path, create symlinks. Idempotent."""
+def initialize(variant: Optional[str] = None) -> None:
+    """One-time setup: add UniVidX to sys.path, create symlinks. Idempotent.
+
+    ``variant`` is forwarded to :func:`ensure_symlinks` so callers
+    that only have one of the UniVidX checkpoints downloaded can still
+    bring up the runtime without tripping ``MissingModelFile``.
+    """
     if str(_UNIVIDX_ROOT) not in sys.path:
         sys.path.insert(0, str(_UNIVIDX_ROOT))
-    ensure_symlinks(_comfy_root(), str(_UNIVIDX_ROOT))
+    ensure_symlinks(_comfy_root(), str(_UNIVIDX_ROOT), variant=variant)
 
 
 @contextlib.contextmanager
 def unividx_cwd():
-    """Temporarily chdir into vendor/UniVidX/ so its relative paths resolve."""
+    """Temporarily chdir into vendor/UniVidX/ so its relative paths resolve.
+
+    NOT thread-safe. ``os.chdir`` is process-global, so two sampler
+    nodes running concurrently would race and leave the cwd at
+    ``vendor/UniVidX`` for unrelated nodes between calls. ComfyUI's
+    default worker runs prompts serially in one thread, so this is
+    fine for the standard install. Anyone running multiple ComfyUI
+    workers in the same process (e.g. an experimental parallel-queue
+    fork) MUST serialize calls to ``unividx_cwd`` or pin UniVidX to
+    a single worker.
+    """
     prev = os.getcwd()
     os.chdir(_UNIVIDX_ROOT)
     try:
@@ -128,7 +143,7 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
     if variant not in ("intrinsic", "alpha"):
         raise ValueError(f"variant must be 'intrinsic' or 'alpha', got {variant!r}")
 
-    paths = resolve_paths(_comfy_root())
+    paths = resolve_paths(_comfy_root(), variant=variant)
     ckpt = paths[f"univid_{variant}_ckpt"]
     cache_key = (variant, ckpt, device, dtype, float(vram_buffer),
                  quantize_fp8, bool(compile_dit), bool(prefer_sage_attn),
@@ -171,7 +186,7 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        initialize()
+        initialize(variant=variant)
 
         # Always undo any global F.scaled_dot_product_attention pollution
         # done by other custom nodes (Stable3DGen monkey-patches it to
@@ -231,8 +246,14 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
             # optimum-quanto. We exclude lora_A/lora_B/lora_embedding
             # layers from quantization so the LoRA adapter stays full
             # precision. On a 32 GB GPU the FP8 DiT (~14 GB) fits fully
-            # resident, so we also drop the VRAM buffer to 0.0 (no need
-            # to stream when everything's already on-chip).
+            # resident — users wanting to reclaim the streaming overhead
+            # can set vram_buffer_gb lower (e.g. 0.5) on the loader
+            # widget; we DO NOT auto-zero it here because that would
+            # silently override an explicit user choice and break the
+            # bench cache_key contract that "vram_buffer is what you
+            # asked for". The bench numbers in CHANGELOG (FP8 wall
+            # ≈ 9.43 min on R2AIN_video, 13% faster than BF16) reflect
+            # the default 4.0 GB buffer.
             # Apply the SageAttention dispatcher AFTER model construction
             # so UniVidX's vendored wan_video_dit modules are imported
             # and present in sys.modules — they have their own

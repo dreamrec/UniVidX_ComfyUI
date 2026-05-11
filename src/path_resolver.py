@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 
 class MissingModelFile(FileNotFoundError):
@@ -21,9 +21,31 @@ _REQUIRED_DIT_SHARDS = [
     f"diffusion_pytorch_model-0000{i}-of-00006.safetensors" for i in range(1, 7)
 ]
 
+_VARIANT_CKPT_NAMES = {
+    "intrinsic": "univid_intrinsic.safetensors",
+    "alpha": "univid_alpha.safetensors",
+}
 
-def resolve_paths(comfy_root: str) -> Dict[str, Union[str, List[str]]]:
-    """Locate Wan2.1-T2V-14B and UniVidX checkpoints under ${comfy_root}/models/."""
+
+def resolve_paths(comfy_root: str,
+                  variant: Optional[str] = None
+                  ) -> Dict[str, Union[str, List[str]]]:
+    """Locate Wan2.1-T2V-14B and UniVidX checkpoints under ``${comfy_root}/models/``.
+
+    ``variant`` (``"intrinsic"`` / ``"alpha"`` / ``None``) selects which
+    UniVidX checkpoint must be present. When ``None`` (back-compat
+    default, used by ``ensure_symlinks`` without a specific variant)
+    BOTH ``univid_intrinsic.safetensors`` and ``univid_alpha.safetensors``
+    are required. When set, only the matching checkpoint is required;
+    the other key in the returned dict is ``None``. This lets users
+    download a single variant's UniVidX weights (~0.8 GB) without
+    needing both.
+    """
+    if variant is not None and variant not in _VARIANT_CKPT_NAMES:
+        raise ValueError(
+            f"variant must be 'intrinsic', 'alpha', or None; got {variant!r}"
+        )
+
     root = Path(comfy_root)
     wan_dir = root / "models" / "wan21_t2v_14b"
     univ_dir = root / "models" / "unividx"
@@ -43,8 +65,15 @@ def resolve_paths(comfy_root: str) -> Dict[str, Union[str, List[str]]]:
     wan_t5 = need(wan_dir / "models_t5_umt5-xxl-enc-bf16.pth")
     wan_vae = need(wan_dir / "Wan2.1_VAE.pth")
     wan_tokenizer_dir = need(wan_dir / "google" / "umt5-xxl")
-    univid_intrinsic_ckpt = need(univ_dir / "univid_intrinsic.safetensors")
-    univid_alpha_ckpt = need(univ_dir / "univid_alpha.safetensors")
+
+    def _resolve_ckpt(key: str) -> Optional[str]:
+        path = univ_dir / _VARIANT_CKPT_NAMES[key]
+        if variant is None or variant == key:
+            return need(path)
+        return str(path.resolve()) if path.exists() else None
+
+    univid_intrinsic_ckpt = _resolve_ckpt("intrinsic")
+    univid_alpha_ckpt = _resolve_ckpt("alpha")
     wan_dit_index = need(wan_dir / "diffusion_pytorch_model.safetensors.index.json")
 
     return {
@@ -92,13 +121,18 @@ def _link_file(src: Path, dst: Path) -> None:
         os.symlink(src, dst)
 
 
-def ensure_symlinks(comfy_root: str, unividx_root: str) -> None:
+def ensure_symlinks(comfy_root: str, unividx_root: str,
+                    variant: Optional[str] = None) -> None:
     """
     Create directory junction + hardlinks inside ${unividx_root}/{models,checkpoints}/
     that point to real files under ${comfy_root}/models/. UniVidX's pipeline code
     uses hardcoded relative paths assuming this layout.
+
+    ``variant`` is forwarded to :func:`resolve_paths`. When set, the
+    other variant's checkpoint may be absent — link only what's
+    present. When ``None`` (back-compat), both variants must exist.
     """
-    paths = resolve_paths(comfy_root)
+    paths = resolve_paths(comfy_root, variant=variant)
     unividx = Path(unividx_root)
 
     wan_target = Path(paths["wan_t5"]).parent  # the wan21_t2v_14b dir
@@ -109,5 +143,8 @@ def ensure_symlinks(comfy_root: str, unividx_root: str) -> None:
         ("univid_intrinsic_ckpt", "univid_intrinsic.safetensors"),
         ("univid_alpha_ckpt", "univid_alpha.safetensors"),
     ]:
+        ckpt = paths[key]
+        if ckpt is None:
+            continue
         link = unividx / "checkpoints" / name
-        _link_file(Path(paths[key]), link)
+        _link_file(Path(ckpt), link)

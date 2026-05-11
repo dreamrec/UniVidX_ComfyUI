@@ -70,8 +70,9 @@ def stub_runtime(monkeypatch):
         "wan_t5": "/fake/t5",
         "wan_vae": "/fake/vae",
     }
-    monkeypatch.setattr(runtime, "resolve_paths", lambda root: fake_paths)
-    monkeypatch.setattr(runtime, "initialize", lambda: None)
+    monkeypatch.setattr(runtime, "resolve_paths",
+                        lambda root, variant=None: fake_paths)
+    monkeypatch.setattr(runtime, "initialize", lambda variant=None: None)
     monkeypatch.setattr(runtime, "unividx_cwd", lambda: nullcontext())
     monkeypatch.setattr(runtime, "_patch_unividx_load_file_to_readonly",
                         lambda: None)
@@ -358,3 +359,54 @@ def test_cache_hit_when_dit_weight_mode_matches(stub_runtime):
     b = load_model("intrinsic", dit_weight_mode="bf16_shards")
     assert a is b
     assert _FakeUniVidModel.instance_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression test for the 0.5.1 NameError: legacy_fp8_qtype undefined
+# ---------------------------------------------------------------------------
+
+def test_dit_weight_mode_fp8_runtime_experimental_through_node_does_not_raise(
+        stub_runtime, monkeypatch, caplog):
+    """0.5.2 regression test for #legacy_fp8_qtype.
+
+    In 0.5.1, picking `dit_weight_mode='fp8_runtime_experimental'`
+    from the loader dropdown with `dtype='bfloat16'` raised
+    ``NameError: name 'legacy_fp8_qtype' is not defined`` — the
+    variable was referenced inside the experimental-path branch but
+    never defined in any enclosing scope. The cache-key test below
+    bypassed this bug because it called ``runtime.load_model`` with
+    ``quantize_fp8='qfloat8'`` directly.
+
+    This test drives the bug-prone path through the node's `.load()`
+    entrypoint AND asserts a deprecation warning is emitted so users
+    know the mode is on the chopping block."""
+    from src import runtime
+    from nodes.loader import UniVidXLoader
+
+    # Stub out the legacy mmgp quantize so the test doesn't try to
+    # actually call mmgp on a fake model.
+    monkeypatch.setattr(runtime, "_quantize_dit_fp8",
+                        lambda model, qtype: None)
+
+    with caplog.at_level(logging.WARNING, logger="unividx"):
+        out = UniVidXLoader().load(
+            variant="intrinsic", dtype="bfloat16",
+            dit_weight_mode="fp8_runtime_experimental",
+        )
+
+    # The node returns a single ((model, variant),) tuple.
+    assert isinstance(out, tuple) and len(out) == 1
+    model_tuple = out[0]
+    assert model_tuple[1] == "intrinsic"
+
+    # Deprecation warning fired so users see the migration signal.
+    deprecation_lines = [r for r in caplog.records
+                         if "fp8_runtime_experimental" in r.message.lower()
+                         and ("deprecat" in r.message.lower()
+                              or "removed" in r.message.lower()
+                              or "legacy" in r.message.lower())]
+    assert deprecation_lines, (
+        "expected a deprecation-style WARNING mentioning "
+        "fp8_runtime_experimental; "
+        f"got: {[r.message for r in caplog.records]}"
+    )

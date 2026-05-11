@@ -136,3 +136,80 @@ def test_plan_chunk_count_for_one_minute_clip():
     # starting at 0..88*16=1408. (1408, 1429). 1429 < 1440 → anchor.
     # Total = 89 regular + 1 anchor = 90. Tight check:
     assert 89 <= len(plan) <= 91
+
+
+# ---------------------------------------------------------------------------
+# build_crossfade_weights — crossfade math for stitch_modality
+# ---------------------------------------------------------------------------
+
+def test_crossfade_single_chunk_is_all_ones():
+    """A single-chunk plan has no neighbours, so the weight vector
+    must be 1.0 everywhere — every frame contributes fully."""
+    plan = [(0, 21)]
+    w = _mod.build_crossfade_weights(plan, 0)
+    assert w.shape == (21,)
+    assert (w == 1.0).all()
+
+
+def test_crossfade_first_chunk_no_head_ramp():
+    """The first chunk has no previous neighbour, so frame 0 must be
+    1.0 (no head ramp), but the tail must ramp down toward the next
+    chunk."""
+    plan = [(0, 21), (16, 37)]  # overlap=5 between chunks
+    w = _mod.build_crossfade_weights(plan, 0)
+    assert w[0] == 1.0  # no head ramp on first chunk
+    # Tail overlap = 5: frames 16..20 (local indices) ramp DOWN.
+    # build_crossfade does w[T-1-j] = (j+1)/(overlap+1) for j in 0..4,
+    # so w[20]=1/6, w[19]=2/6, w[18]=3/6, w[17]=4/6, w[16]=5/6.
+    assert w[20] == pytest.approx(1 / 6)
+    assert w[16] == pytest.approx(5 / 6)
+    # Frames 0..15 stay at the plateau.
+    assert (w[:16] == 1.0).all()
+
+
+def test_crossfade_last_chunk_no_tail_ramp():
+    """The final chunk has no next neighbour, so the tail must stay
+    at 1.0 (no tail ramp), but the head must ramp up away from the
+    previous chunk."""
+    plan = [(0, 21), (16, 37)]
+    w = _mod.build_crossfade_weights(plan, 1)
+    # Head overlap = 5: frames 0..4 ramp UP, w[0]=1/6 .. w[4]=5/6.
+    assert w[0] == pytest.approx(1 / 6)
+    assert w[4] == pytest.approx(5 / 6)
+    assert w[-1] == 1.0  # no tail ramp on last chunk
+
+
+def test_crossfade_seam_weights_sum_to_one():
+    """At each frame in the overlap region between two adjacent
+    chunks, the two contributing weights must sum to 1.0 — that's
+    the property the linear-ramp design is reaching for, and the
+    weighted-average normalization in stitch_modality relies on it
+    for the seam to be artifact-free."""
+    plan = [(0, 21), (16, 37)]  # 5-frame overlap at indices 16..20
+    w_left = _mod.build_crossfade_weights(plan, 0)
+    w_right = _mod.build_crossfade_weights(plan, 1)
+    for j in range(5):
+        # Left chunk's frame at local index 16+j corresponds to right
+        # chunk's frame at local index j.
+        left_w = w_left[16 + j]
+        right_w = w_right[j]
+        assert left_w + right_w == pytest.approx(1.0), (
+            f"seam frame {j}: left={left_w}, right={right_w}, "
+            f"sum={left_w + right_w}"
+        )
+
+
+def test_crossfade_handles_anchor_chunk_long_overlap():
+    """The final anchor chunk may overlap the previous chunk by more
+    than the configured overlap. build_crossfade_weights must size
+    the ramp to the actual overlap (computed from chunk boundaries),
+    not the user-supplied `overlap` arg."""
+    # stride=16; total=40 produces plan = [(0,21), (16,37), (19,40)].
+    # Anchor chunk overlaps previous (16,37) by 18 frames (37-19=18).
+    plan = _mod.plan_chunks(total_frames=40, chunk_size=21, overlap=5)
+    w_anchor = _mod.build_crossfade_weights(plan, len(plan) - 1)
+    # The first 18 frames of the anchor must ramp from 1/19 up to 18/19.
+    assert w_anchor[0] == pytest.approx(1 / 19)
+    assert w_anchor[17] == pytest.approx(18 / 19)
+    # Frames past the overlap stay at 1.0 (it's the last chunk).
+    assert (w_anchor[18:] == 1.0).all()

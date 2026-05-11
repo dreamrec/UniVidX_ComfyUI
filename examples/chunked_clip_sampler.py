@@ -339,34 +339,47 @@ def load_chunk_frames(prefix_tag: str, chunk_idx: int,
     return np.stack(arrs, axis=0)  # [T, H, W, 3]
 
 
+def build_crossfade_weights(chunk_plan: list[tuple[int, int]],
+                             chunk_idx: int) -> np.ndarray:
+    """Per-frame crossfade weight vector for chunk ``chunk_idx``.
+
+    Length matches that chunk's frame count (``end - start``). The
+    weight ramps linearly up across the overlap with the previous
+    chunk, plateaus at 1.0, then ramps linearly down across the
+    overlap with the next chunk. The first chunk has no head ramp;
+    the last has no tail ramp.
+
+    Extracted from ``stitch_modality`` so the math can be unit-tested
+    independently of disk I/O and PIL.
+    """
+    start, end = chunk_plan[chunk_idx]
+    T = end - start
+    w = np.ones(T, dtype=np.float32)
+    if chunk_idx > 0:
+        prev_end = chunk_plan[chunk_idx - 1][1]
+        overlap = max(0, prev_end - start)
+        for j in range(overlap):
+            w[j] = (j + 1) / (overlap + 1)
+    if chunk_idx < len(chunk_plan) - 1:
+        next_start = chunk_plan[chunk_idx + 1][0]
+        overlap = max(0, end - next_start)
+        for j in range(overlap):
+            w[T - 1 - j] = (j + 1) / (overlap + 1)
+    return w
+
+
 def stitch_modality(chunk_plan: list[tuple[int, int]], prefix_tag: str,
                      modality: str, total_frames: int) -> np.ndarray:
     """Stitch per-chunk frames into a single [total_frames, H, W, 3] array
     with linear crossfade across overlap regions."""
-    # Load all chunk arrays.
     chunk_arrs = [load_chunk_frames(prefix_tag, i, modality)
                   for i in range(len(chunk_plan))]
     H, W = chunk_arrs[0].shape[1], chunk_arrs[0].shape[2]
     output = np.zeros((total_frames, H, W, 3), dtype=np.float32)
     weight = np.zeros((total_frames,), dtype=np.float32)
     for ci, ((start, end), arr) in enumerate(zip(chunk_plan, chunk_arrs)):
-        T = end - start  # should be 21
-        # Linear weight: ramp up over first overlap frames, plateau,
-        # ramp down over last overlap frames. For the first chunk's
-        # head and the last chunk's tail, weight stays at 1.0.
-        w = np.ones(T, dtype=np.float32)
-        # Ramp at the start (unless this is the first chunk)
-        if ci > 0:
-            prev_end = chunk_plan[ci - 1][1]
-            overlap = max(0, prev_end - start)
-            for j in range(overlap):
-                w[j] = (j + 1) / (overlap + 1)
-        # Ramp at the end (unless this is the last chunk)
-        if ci < len(chunk_plan) - 1:
-            next_start = chunk_plan[ci + 1][0]
-            overlap = max(0, end - next_start)
-            for j in range(overlap):
-                w[T - 1 - j] = (j + 1) / (overlap + 1)
+        w = build_crossfade_weights(chunk_plan, ci)
+        T = end - start
         for f_local in range(T):
             f_global = start + f_local
             if 0 <= f_global < total_frames:

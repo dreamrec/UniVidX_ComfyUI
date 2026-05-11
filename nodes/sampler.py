@@ -106,10 +106,16 @@ class UniVidXSampler:
         supplied = {k for k, v in supplied_imgs.items() if v is not None}
         validate_mode(mode, supplied_inputs=supplied)
 
-        # Convert each supplied IMAGE to UniVidX's expected video tensor
+        # Convert each supplied IMAGE to UniVidX's expected video tensor.
+        # UniVidX always operates the pipeline at BF16 — even when the DiT
+        # has been FP8-quantized, the VAE encoder + activations + KV cache
+        # stay BF16, so conditioning videos MUST be BF16. The earlier
+        # `next(model.parameters()).dtype` heuristic was fragile: after
+        # FP8 substitution, the first parameter may be `torch.float8_e4m3fn`
+        # depending on module ordering, which would cast the conditioning
+        # tensors to FP8 and crash at the VAE encode boundary.
         device = "cuda"
-        dtype = next(model_instance.parameters()).dtype if hasattr(model_instance, "parameters") \
-                else torch.bfloat16
+        dtype = torch.bfloat16
         video_tensors = {}
         for key in required_inputs(mode):
             img = supplied_imgs[key]

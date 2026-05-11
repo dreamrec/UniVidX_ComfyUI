@@ -97,8 +97,9 @@ def stub_runtime(monkeypatch):
         "wan_t5": "/fake/t5",
         "wan_vae": "/fake/vae",
     }
-    monkeypatch.setattr(runtime, "resolve_paths", lambda root: fake_paths)
-    monkeypatch.setattr(runtime, "initialize", lambda: None)
+    monkeypatch.setattr(runtime, "resolve_paths",
+                        lambda root, variant=None: fake_paths)
+    monkeypatch.setattr(runtime, "initialize", lambda variant=None: None)
     monkeypatch.setattr(runtime, "unividx_cwd", lambda: nullcontext())
     monkeypatch.setattr(runtime, "_patch_unividx_load_file_to_readonly",
                         lambda: None)
