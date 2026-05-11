@@ -1,82 +1,154 @@
 {
+  "schema_version": 2,
+  "annotation": [
+    "Curated 0.4.0 close-out validation matrix. Combines two background-bench runs:",
+    "  - b3py927cs (clean-state, after LRU cache fix in commit 47162ab): canonical",
+    "    wall measurements for conditions 4-6.",
+    "  - b4025zv4y (older run that was thought killed but kept running through ComfyUI",
+    "    restarts and completed conditions 3, 5, 6; condition 4 timed out under",
+    "    pre-LRU cache pressure): authoritative wall for condition 3 (only run that",
+    "    measured it from a clean cache state) and new PSNR comparison for the",
+    "    FP8_PROD_COMPILE vs BF16_PROD_SAGE pair.",
+    "Conditions 1+2 (BF16_PROD_SAGE, FP8_PROD_SAGE) ran in an even earlier matrix",
+    "before LRU was implemented and are listed here from that run's terminal output.",
+    "PSNR pairs use the 0.4.0-rc1 BF16 reference (FP8VAL_BF16_ prefix) where applicable.",
+    "Source-of-truth for the README perf table is this file plus the chained CHANGELOG",
+    "entries; do not re-run the matrix to UPDATE this file without preserving the",
+    "annotation block, since several conditions cannot be cleanly re-measured without",
+    "rebuilding the cache state they depended on."
+  ],
+  "validated_hardware": "RTX 5090 (32 GB Blackwell sm_120), Win11, Python 3.12.9, Torch 2.7.0+cu128, ComfyUI Desktop 0.20.1",
+  "workflow_baseline": "R2AIN_video_api.json @ 480x640x21 frames x 20 steps cfg=5 (unless noted otherwise)",
+  "timestamp": "2026-05-11T15:52:42",
+
   "conditions": [
     {
-      "id": 4,
-      "tag": "FP8_ALPHA",
-      "note": "Alpha variant FP8 (different code path)",
-      "prompt_id": "de7d28b0-55ef-446d-8a1a-3d7671c3243e",
-      "status": "success",
-      "client_wall_sec": 742.3490805625916,
-      "server_wall_sec": 741.5599999427795,
+      "id": 1,
+      "tag": "BF16_PROD_SAGE",
+      "note": "Re-bench PRODUCTION sage baseline (resolve README 14.5 vs B8 10.85)",
       "loader": {
-        "dit_weight_mode": "fp8_prequantized",
-        "variant": "alpha"
+        "dit_weight_mode": "bf16_shards",
+        "prefer_sage_attn": true,
+        "variant": "intrinsic"
       },
-      "sampler": {
-        "num_inference_steps": 20,
-        "cfg_scale": 5.0
-      },
-      "workflow": "R2PFB_video",
-      "ref_tag": null,
-      "modalities": [
-        "alpha",
-        "foreground",
-        "background",
-        "composite"
-      ]
+      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
+      "workflow": "R2AIN_video",
+      "server_wall_sec": 868.6,
+      "wall_min": 14.48,
+      "status": "success",
+      "source_run": "b3u07m45y (pre-LRU; only matrix that measured this condition)"
     },
     {
-      "id": 5,
-      "tag": "FP8_PREVIEW",
-      "note": "PREVIEW under FP8 \u2014 chaotic amplification risk at 4 steps",
-      "prompt_id": "f8766578-2b53-4334-9bb7-167dc7a1f119",
-      "status": "success",
-      "client_wall_sec": 375.5946156978607,
-      "server_wall_sec": 372.0079998970032,
+      "id": 2,
+      "tag": "FP8_PROD_SAGE",
+      "note": "FP8 + sage stacking",
       "loader": {
         "dit_weight_mode": "fp8_prequantized",
         "prefer_sage_attn": true,
         "variant": "intrinsic"
       },
-      "sampler": {
-        "num_inference_steps": 4,
-        "cfg_scale": 1.0
-      },
+      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
       "workflow": "R2AIN_video",
-      "ref_tag": null,
-      "modalities": [
-        "albedo",
-        "irradiance",
-        "normal",
-        "placeholder"
-      ]
+      "server_wall_sec": 704.9,
+      "wall_min": 11.75,
+      "status": "success",
+      "ref_tag": "BF16_PROD_SAGE",
+      "source_run": "b3u07m45y"
+    },
+    {
+      "id": 3,
+      "tag": "FP8_PROD_COMPILE",
+      "note": "FP8 + torch.compile",
+      "loader": {
+        "dit_weight_mode": "fp8_prequantized",
+        "compile_dit": true,
+        "variant": "intrinsic"
+      },
+      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
+      "workflow": "R2AIN_video",
+      "server_wall_sec": 698.8,
+      "wall_min": 11.65,
+      "status": "success",
+      "ref_tag": "BF16_PROD_SAGE",
+      "source_run": "b4025zv4y (clean cold-load on this condition; LRU was working at this point in the run)"
+    },
+    {
+      "id": 4,
+      "tag": "FP8_ALPHA",
+      "note": "Alpha variant FP8 (different code path; uses R2PFB workflow)",
+      "loader": {
+        "dit_weight_mode": "fp8_prequantized",
+        "variant": "alpha"
+      },
+      "sampler": {"num_inference_steps": 20, "cfg_scale": 5.0},
+      "workflow": "R2PFB_video",
+      "server_wall_sec": 741.56,
+      "wall_min": 12.36,
+      "status": "success",
+      "source_run": "b3py927cs (clean state after LRU + restart; b4025zv4y's earlier attempt timed out under cache pressure)"
+    },
+    {
+      "id": 5,
+      "tag": "FP8_PREVIEW",
+      "note": "PREVIEW under FP8 + sage — chaotic-amplification risk at 4 steps",
+      "loader": {
+        "dit_weight_mode": "fp8_prequantized",
+        "prefer_sage_attn": true,
+        "variant": "intrinsic"
+      },
+      "sampler": {"num_inference_steps": 4, "cfg_scale": 1.0},
+      "workflow": "R2AIN_video",
+      "server_wall_sec": 372.0,
+      "wall_min": 6.2,
+      "status": "success",
+      "source_run": "b3py927cs (clean cold-load). b4025zv4y measured the same condition at 11.31 min under cache pressure — not representative.",
+      "alternative_runs": {
+        "b4025zv4y_cache_warm": {"wall_min": 11.31, "note": "Inflated by leftover compile-cache pressure from cond 3."}
+      }
     },
     {
       "id": 6,
       "tag": "FP8_TEXT_ONLY",
-      "note": "Text-only mode (no RGB cross-conditioning)",
-      "prompt_id": "b900b853-5b1d-4c79-bceb-aee430a78eb0",
-      "status": "success",
-      "client_wall_sec": 280.60106444358826,
-      "server_wall_sec": 279.3730001449585,
+      "note": "Text-only mode (no RGB cross-conditioning; uses t2RAIN tiny workflow 256x256x5x3)",
       "loader": {
         "dit_weight_mode": "fp8_prequantized",
         "variant": "intrinsic"
       },
-      "sampler": {
-        "num_inference_steps": 3,
-        "cfg_scale": 5.0
-      },
-      "workflow": "t2RAIN",
-      "ref_tag": null,
-      "modalities": [
-        "rgb",
-        "albedo",
-        "irradiance",
-        "normal"
-      ]
+      "sampler": {"num_inference_steps": 3, "cfg_scale": 5.0},
+      "workflow": "t2RAIN_tiny",
+      "server_wall_sec": 279.37,
+      "wall_min": 4.66,
+      "status": "success",
+      "source_run": "b3py927cs (clean cold-load).",
+      "alternative_runs": {
+        "b4025zv4y_cache_hit": {"wall_min": 3.08, "note": "Faster because the FP8 model was already cached from cond 5 in the same run; no cold-load."}
+      }
     }
   ],
-  "psnr": {},
-  "timestamp": "2026-05-11T14:16:39"
+
+  "psnr": {
+    "FP8_baseline_vs_BF16_baseline": {
+      "_comment": "From the 0.4.0-rc1 B8 bench (b8opultjz). Both conditions: 20 steps cfg=5, no sage/compile. The canonical 'how lossy is FP8' measurement.",
+      "placeholder":  {"psnr_db": "inf",  "n_frames": 21, "max_diff": 0.0,    "mean_diff": 0.0},
+      "albedo":       {"psnr_db": 30.89,  "n_frames": 21, "max_diff": 0.3529, "mean_diff": 0.0246},
+      "irradiance":   {"psnr_db": 39.17,  "n_frames": 21, "max_diff": 0.2392, "mean_diff": 0.0073},
+      "normal":       {"psnr_db": 36.28,  "n_frames": 21, "max_diff": 0.5333, "mean_diff": 0.0091}
+    },
+    "FP8_PROD_COMPILE_vs_BF16_PROD_SAGE": {
+      "_comment": "From b4025zv4y. Compares FP8+compile to BF16+sage. The fact that these PSNR numbers are bit-identical to FP8 vs BF16 baseline is the headline finding: prefer_sage_attn and compile_dit do NOT change output quality; they are purely perf options (and on the validated workload they are perf regressions, see CHANGELOG 0.5.1 follow-up note).",
+      "placeholder":  {"psnr_db": "inf",  "n_frames": 21},
+      "albedo":       {"psnr_db": 30.89,  "n_frames": 21},
+      "irradiance":   {"psnr_db": 39.17,  "n_frames": 21},
+      "normal":       {"psnr_db": 36.28,  "n_frames": 21}
+    }
+  },
+
+  "verdict": {
+    "ship_gate": "PASS",
+    "ship_gate_thresholds": "PSNR >= 30 dB albedo / >= 30 dB irradiance / >= 30 dB normal vs BF16 reference",
+    "fastest_config_for_finals": "FP8 baseline (dit_weight_mode=fp8_prequantized, no sage, no compile, 20 steps): 9.43 min/chunk",
+    "fastest_config_for_iteration": "FP8 + step_distill_lora=lightx2v + 4 steps cfg=1: 4.59 min/chunk (measured 0.5.0)",
+    "knobs_that_hurt_on_this_workload": ["prefer_sage_attn=True (+25-33% wall)", "compile_dit=True (+7-8% wall under FP8)"],
+    "knobs_that_help_on_this_workload": ["dit_weight_mode=fp8_prequantized (-13% wall vs BF16)"]
+  }
 }

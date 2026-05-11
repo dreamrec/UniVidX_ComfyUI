@@ -100,6 +100,36 @@ widget AND saved with the old `auto` value or no explicit
 `dit_weight_mode` set. Those workflows now use FP8 instead of BF16
 — that's the intended fix.
 
+### Follow-up: residual bench data confirms quality framing
+
+A background bench run (`b4025zv4y`) that I had thought killed during
+the cache-pressure thrash earlier in the 0.5.0 cycle actually kept
+running through the ComfyUI restarts and completed conditions 3+5+6
+hours later. The data sat in
+`examples/test_matrix/040_validation.json` (since merged with the
+`b3py927cs` clean-state run to produce a curated single source of
+truth for the matrix). The headline finding from that residual data:
+
+  **PSNR(FP8+compile vs BF16+sage) is bit-identical to PSNR(FP8 vs BF16
+  baseline)** across all four modalities (albedo 30.89 dB, irradiance
+  39.17 dB, normal 36.28 dB, placeholder exact match).
+
+That bit-identity tells us:
+- `prefer_sage_attn=True` produces BF16-equivalent outputs on this
+  workload — the sage path is a no-op quality-wise (just slower on
+  R2AIN_video, see the +33% wall in the perf matrix).
+- `compile_dit=True` produces FP8-equivalent outputs — torch.compile
+  graph-captures `FP8Linear` cleanly without numerical drift.
+
+This **strengthens the 0.5.1 docs**: when we say "leave sage/compile
+off because they hurt wall time, " we now also know that toggling
+them on doesn't buy quality either. No "but maybe the outputs look
+better" residual uncertainty.
+
+The merged matrix file at `examples/test_matrix/040_validation.json`
+documents the source run for each measurement so future readers can
+reproduce or audit any single cell.
+
 ---
 
 ## 0.5.0 — 2026-05-11
