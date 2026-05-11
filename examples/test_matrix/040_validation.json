@@ -1,0 +1,82 @@
+{
+  "conditions": [
+    {
+      "id": 4,
+      "tag": "FP8_ALPHA",
+      "note": "Alpha variant FP8 (different code path)",
+      "prompt_id": "de7d28b0-55ef-446d-8a1a-3d7671c3243e",
+      "status": "success",
+      "client_wall_sec": 742.3490805625916,
+      "server_wall_sec": 741.5599999427795,
+      "loader": {
+        "dit_weight_mode": "fp8_prequantized",
+        "variant": "alpha"
+      },
+      "sampler": {
+        "num_inference_steps": 20,
+        "cfg_scale": 5.0
+      },
+      "workflow": "R2PFB_video",
+      "ref_tag": null,
+      "modalities": [
+        "alpha",
+        "foreground",
+        "background",
+        "composite"
+      ]
+    },
+    {
+      "id": 5,
+      "tag": "FP8_PREVIEW",
+      "note": "PREVIEW under FP8 \u2014 chaotic amplification risk at 4 steps",
+      "prompt_id": "f8766578-2b53-4334-9bb7-167dc7a1f119",
+      "status": "success",
+      "client_wall_sec": 375.5946156978607,
+      "server_wall_sec": 372.0079998970032,
+      "loader": {
+        "dit_weight_mode": "fp8_prequantized",
+        "prefer_sage_attn": true,
+        "variant": "intrinsic"
+      },
+      "sampler": {
+        "num_inference_steps": 4,
+        "cfg_scale": 1.0
+      },
+      "workflow": "R2AIN_video",
+      "ref_tag": null,
+      "modalities": [
+        "albedo",
+        "irradiance",
+        "normal",
+        "placeholder"
+      ]
+    },
+    {
+      "id": 6,
+      "tag": "FP8_TEXT_ONLY",
+      "note": "Text-only mode (no RGB cross-conditioning)",
+      "prompt_id": "b900b853-5b1d-4c79-bceb-aee430a78eb0",
+      "status": "success",
+      "client_wall_sec": 280.60106444358826,
+      "server_wall_sec": 279.3730001449585,
+      "loader": {
+        "dit_weight_mode": "fp8_prequantized",
+        "variant": "intrinsic"
+      },
+      "sampler": {
+        "num_inference_steps": 3,
+        "cfg_scale": 5.0
+      },
+      "workflow": "t2RAIN",
+      "ref_tag": null,
+      "modalities": [
+        "rgb",
+        "albedo",
+        "irradiance",
+        "normal"
+      ]
+    }
+  ],
+  "psnr": {},
+  "timestamp": "2026-05-11T14:16:39"
+}

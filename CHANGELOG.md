@@ -1,5 +1,115 @@
 # Changelog
 
+## 0.4.0 — 2026-05-11
+
+Tier-B Phase 1 final release. Tagged after the close-out validation
+matrix landed measurements for FP8 stacked against every other perf
+knob in the system, plus alpha/PREVIEW/text-only configurations, plus
+a long-clip chunked sampler for clips beyond the 21-frame training
+window.
+
+### Headline: just set `dit_weight_mode='fp8_prequantized'` — leave everything else default
+
+The six-condition validation matrix found that **every other perf
+knob is now a regression on top of FP8**:
+
+| Configuration (R2AIN_video, 480×640×21×20) | Wall (min) | vs BF16 |
+|---|---|---|
+| BF16 baseline (no extras) | 10.85 | 0% |
+| **FP8 baseline** (just dit_weight_mode=fp8_prequantized) | **9.43** | **−13.1%** |
+| BF16 + sage | 14.48 | +33.5% |
+| FP8 + sage | 11.75 | +8.3% |
+| FP8 + compile_dit | 11.65 | +7.4% |
+| FP8 alpha variant (R2PFB workflow) | 12.36 | +14% |
+| FP8 PREVIEW + sage (4 steps cfg=1) | 6.20 | (different sampler config) |
+| FP8 text-only tiny (t2RAIN 256×256×5×3) | 4.66 | (different workflow) |
+
+The findings that update prior README claims:
+
+- **`prefer_sage_attn=True` is +33% wall on R2AIN_video at BF16** — the
+  opposite of the −18% the 0.2.0 perf-table claimed. That measurement
+  was on a different config, never re-validated until 0.4.0 close-out.
+  **Sage now hurts on this workload regardless of FP8.** Earlier sage
+  benefits were probably on text-only / shorter-frame configs.
+- **`compile_dit=True` is +7-8% wall under FP8** — graph-captures
+  cleanly on `FP8Linear` (no crash) but doesn't help. The per-step
+  speedup torch.compile delivers on BF16 streaming-bound workloads
+  has nothing to bite into when FP8 is already fully VRAM-resident.
+
+So the perf table is now substantially simpler: **set
+`dit_weight_mode=fp8_prequantized`, default everything else, done**.
+
+### Per-modality quality (FP8 vs BF16, 0.4.0-rc1 B8 numbers)
+
+| Modality | PSNR (dB) | Threshold | Verdict |
+|---|---|---|---|
+| placeholder (RGB-conditioned slot) | inf (exact match) | ≥30 | PASS |
+| albedo | 30.89 | ≥30 | PASS |
+| irradiance | 39.17 | ≥30 | PASS (by ~9 dB) |
+| normal | 36.28 | ≥30 | PASS (by ~6 dB) |
+
+### Added since 0.4.0-rc1
+
+- **`examples/_bench_matrix_040.py`** — six-condition validation
+  matrix driver. Queues each condition via `/prompt`, polls
+  `/history` to completion, extracts wall + (where applicable)
+  per-modality PSNR. Results written to
+  `examples/test_matrix/040_validation.json`. ([`a6e73be`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/a6e73be))
+- **LRU-bounded `_MODEL_CACHE`** — caps cached model count at
+  `UNIVIDX_MODEL_CACHE_MAX` (default 2). Found during the matrix
+  run: with the old unbounded dict, accumulating six distinct loader
+  configurations pushed torch memory accounting to 38 GB on a 32 GB
+  card, thrashing condition 3 to 132 sec/step before manual kill.
+  Eviction happens BEFORE constructing the next model so peak host
+  RAM stays at one model's-worth (~28 GB BF16 cold-load) rather
+  than two. ([`47162ab`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/47162ab))
+- **`examples/chunked_clip_sampler.py`** — long-clip driver. For
+  source video > 21 frames, slices into overlapping windows, runs
+  UniVidX per chunk, stitches per-modality PNGs with linear
+  crossfade across the overlap, encodes 4 MP4s via imageio. Five
+  preset shortcuts (PRODUCTION, FP8, FP8_SAGE, PREVIEW,
+  FP8_PREVIEW) pulling from the validated config table above.
+  Wall estimate: 1 min @ 24 fps clip ≈ 14 hours at FP8 quality,
+  ~1.8 hours at FP8_PREVIEW. 12 unit tests pin the chunk-planning
+  invariants. EXPERIMENTAL — end-to-end against a real clip not
+  yet validated. ([`c5615b6`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/c5615b6))
+
+### Cleanup since 0.4.0-rc1
+
+- Deleted throwaway sanity scripts (`_sanity_a1.py`, `_bench_perf.py`).
+- Renamed `_sanity_fp8_prequantized.py` → `_smoke_fp8.py` and reframed
+  as a regression smoke test rather than one-shot probe.
+- File-first FP8 dispatch: `_resolve_fp8_weights_path()` now looks
+  for the `_scaled` Kijai variant (which doesn't exist for Wan2.1
+  upstream as of 0.4.0, but if it lands, dropping the file in
+  `models/diffusion_models/` will opt into the file-based loader
+  with no code changes). When absent → fall back to runtime quantize
+  (the 0.4.0 default). Dispatcher: `_apply_fp8_substitution_from_file`
+  vs `_apply_fp8_substitution_runtime_quantize`. ([`379af58`](https://github.com/dreamrec/UniVidX_ComfyUI/commit/379af58))
+- Archived `ROADMAP_v0.3.md` → `docs/history/`; wrote new
+  `ROADMAP.md` as a living plan for 0.4.0 close-out + 0.5.0
+  candidates.
+- README perf section rewritten with the validation matrix + the
+  "just use FP8" recommendation. The old "Two presets to remember"
+  framing replaced with a single recommendation + a full matrix
+  table that doesn't hide the surprising findings.
+
+### Tests: 39 → 74
+
+| Phase | Test count |
+|---|---|
+| 0.3.0 baseline | 39 |
+| 0.4.0-rc1 (FP8 + B-tier) | 58 |
+| Cleanup + dispatch | 60 |
+| LRU + clear_cache | 62 |
+| Chunked sampler planner | 74 |
+
+### Pyproject
+
+Version: 0.4.0-rc1 → 0.4.0. Tag: `v0.4.0`.
+
+---
+
 ## 0.4.0-rc1 — 2026-05-11
 
 **Tier B Phase 1 ships: FP8 e4m3fn DiT runtime quantization.** The

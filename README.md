@@ -66,53 +66,92 @@ hf download houyuanchen/UniVidX    --local-dir ComfyUI/models/unividx
 
 For real video-clip conditioning (your own MP4), use [`examples/R2AIN_video_api.json`](examples/R2AIN_video_api.json) (intrinsic) or [`examples/R2PFB_video_api.json`](examples/R2PFB_video_api.json) (alpha). They load 21 evenly-spaced frames from disk via `VHS_LoadVideoPath`, which means you'll also need [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) installed.
 
-## Two presets to remember
+## The 0.4.0 recommendation
 
-All numbers measured on RTX 5090 (32 GB), R2AIN @ 480×640×21 frames, video-conditioned LTX portrait clip.
+**Just set `dit_weight_mode=fp8_prequantized`.** Leave everything else default. Don't enable `prefer_sage_attn`, don't enable `compile_dit`.
 
-| Preset | Loader settings | Sampler settings | Wall time | Use for |
-|---|---|---|---|---|
-| **PRODUCTION** | `prefer_sage_attn=True` *(or `compile_dit=True`, pick one)* | `num_inference_steps=20`, `cfg_scale=5.0` | **~14.5 min** ⚠️ | Final renders |
-| **PREVIEW** | `prefer_sage_attn=True` | `num_inference_steps=4`, `cfg_scale=1.0` | **~1.4 min** *(13× faster)* | Iterating on RGB-conditioned modes (`R2AIN`, `R2PFB`) — DO NOT use for text-only modes |
-| **FP8 PRODUCTION** *(new in 0.4.0)* | `dit_weight_mode=fp8_prequantized` | `num_inference_steps=20`, `cfg_scale=5.0` | **9.43 min** *(measured)* | Final renders on memory-constrained cards (~14 GB DiT VRAM) — strictly better than PRODUCTION on this hardware |
+That single knob gives you a measured **9.43 min wall** on the production R2AIN_video workflow vs **10.85 min BF16 baseline** — a 13% speedup AND a 50% DiT memory cut (~28 GB → ~14 GB). All other "optimizations" measured slower than plain FP8 on this hardware (see the validation matrix below).
 
-⚠️ The PRODUCTION row's "~14.5 min" was measured pre-0.3.0 and is being re-benched as part of the 0.4.0 close-out — Tier-B's no-sage BF16 baseline measured 10.85 min on the same workflow, which is inconsistent with `prefer_sage_attn=True` shaving "–18%" wall. See [`ROADMAP.md`](ROADMAP.md) → "Close 0.4.0 final."
+## Full validation matrix (0.4.0, RTX 5090, R2AIN_video @ 480×640×21×20 frames)
 
-The PREVIEW preset gives marginally softer detail (tie stripe, facial geometry) but all decompositions remain physically correct on this content. Validate per content type if you have high-motion clips.
+| Configuration | Wall (min) | Δ vs BF16 baseline | Notes |
+|---|---|---|---|
+| **BF16 baseline** (no extras) | 10.85 | 0% | The reference point. ~28 GB DiT, vram_buffer streaming. |
+| **🏆 FP8 baseline** (just `dit_weight_mode=fp8_prequantized`) | **9.43** | **−13.1%** | **Recommended.** ~14 GB DiT fully resident; no streaming overhead. |
+| BF16 + sage | 14.48 | +33.5% | sage_attn is +33% wall on this workload; *not* the −18% advertised by 0.2.0 |
+| FP8 + sage | 11.75 | +8.3% | sage compounds with FP8 negatively too |
+| FP8 + compile_dit | 11.65 | +7.4% | torch.compile graph-captures cleanly on FP8Linear but doesn't help; +~90 s graph capture amortized over 20 steps |
+| FP8 alpha variant (R2PFB) | 12.36 | +14% | Different CMSA pattern; slightly slower than intrinsic variant, but works correctly |
+| FP8 PREVIEW + sage (4 steps cfg=1) | 6.20 | (different config) | Short-step preview path; cold-load dominates wall |
+| FP8 text-only tiny (t2RAIN 256×256×5×3) | 4.66 | (different config) | Tiny smoke test config |
+
+### Quality (FP8 vs BF16, R2AIN_video, same seed, 21 frames)
+
+| Modality | PSNR (dB) | Threshold | Verdict |
+|---|---|---|---|
+| placeholder (RGB output slot when RGB is condition) | inf (exact) | ≥30 | PASS |
+| albedo | 30.89 | ≥30 | PASS |
+| irradiance | 39.17 | ≥30 | PASS, comfortable margin |
+| normal | 36.28 | ≥30 | PASS, comfortable margin |
 
 ## Using FP8 (new in 0.4.0)
 
-On a 32 GB card the simplest performance + memory win is:
+Set this on `UniVidXLoader`:
 
 ```
-UniVidXLoader
-  variant            = intrinsic   (or alpha)
-  dtype              = bfloat16
-  dit_weight_mode    = fp8_prequantized   ← the new knob
-  vram_buffer_gb     = 4.0
-  prefer_sage_attn   = False
-  compile_dit        = False
+variant            = intrinsic     (or alpha)
+dtype              = bfloat16
+dit_weight_mode    = fp8_prequantized
+vram_buffer_gb     = 4.0
+prefer_sage_attn   = False
+compile_dit        = False
 ```
 
-That gives ~14 GB DiT residency (vs ~28 GB BF16) and ~9.4 min wall on the R2AIN_video_api.json workflow at production scale. Quality: PSNR vs BF16 measured at 30.89 dB (albedo), 39.17 dB (irradiance), 36.28 dB (normal), exact match on RGB-conditioned slots. See CHANGELOG `0.4.0-rc1` for the full benchmark.
+How it works under the hood: after UniVidX's standard BF16 cold-load, the loader walks the DiT, computes per-tensor absmax scales for each Linear layer, casts the weights to `torch.float8_e4m3fn`, and replaces each Linear with an `FP8Linear` that dequantizes on forward. UniVidX's per-modality LoRA adapters (the four `lora_A/B_<mod>` pairs at each attention block) are preserved at BF16 by walking through PEFT wrappers and replacing only the inner base layer. No external file needed — when a Kijai `Wan2_1-T2V-14B_fp8_e4m3fn_scaled.safetensors` lands upstream and is dropped into `models/diffusion_models/`, the loader will use it directly instead of runtime-quantizing.
 
-How it works: after UniVidX's standard BF16 cold-load, the loader walks the DiT, computes per-tensor absmax scales for each Linear layer, casts the weight tensors to `torch.float8_e4m3fn`, and replaces each Linear with an `FP8Linear` that dequantizes on forward. UniVidX's per-modality LoRA adapters (the four `lora_A/B_<mod>` pairs at each attention block) are preserved at BF16 by walking through PEFT wrappers and replacing only the inner base layer. No external file needed — when a Kijai `Wan2_1-T2V-14B_fp8_e4m3fn_scaled.safetensors` lands upstream and is dropped into `models/diffusion_models/`, the loader will use it directly instead of runtime-quantizing.
+## Processing longer clips (chunked sampler)
 
-Stacking compatibility with `prefer_sage_attn` / `compile_dit` is being validated as part of 0.4.0 close-out.
+UniVidX is trained at 21 frames per inference. For source clips longer than ~1 second, use `examples/chunked_clip_sampler.py` — it slices your source into overlapping 21-frame windows, runs UniVidX on each, and stitches the per-modality outputs into 4 MP4s with a linear crossfade across the overlap.
 
-## Optimization knobs (Loader)
+```bash
+python examples/chunked_clip_sampler.py \
+    --input  C:/path/to/your_clip.mp4 \
+    --mode   R2AIN \
+    --output-dir  C:/path/to/output \
+    --preset FP8        # fastest at production quality; ~14 hours per 1 min @ 24fps
+    # other presets: PRODUCTION, FP8_SAGE, PREVIEW, FP8_PREVIEW
+```
 
-Wired and validated on Blackwell (RTX 5090) + Windows + Python 3.12 + Torch 2.7.0+cu128:
+Wall-time guide for a 1-minute @ 24 fps clip (1440 frames → 90 chunks):
 
-| Knob | Effect | Measured Δ vs baseline | Notes |
-|---|---|---|---|
-| `prefer_sage_attn=True` | Patches DiffSynth + UniVidX `flash_attention()` to cascade `sage → FA2 → SDPA`. Defensively un-pollutes `F.scaled_dot_product_attention` (see Stable3DGen note below). | **–18% wall, –21% per-step** | Quality verified visually identical to FA2 baseline |
-| `compile_dit=True` | `torch.compile(dit, mode='reduce-overhead', dynamic=True)` | **–17% wall, –28% per-step** | First sampler step pays ~90 s graph capture |
-| `dtype=fp8_e4m3fn` / `fp8_e5m2` | Post-quantize DiT via `mmgp.offload.quantize` | **DEPRECATED — hangs in our test, removed in 0.5.0** | Use `dit_weight_mode=fp8_prequantized` instead |
-| `dit_weight_mode=fp8_prequantized` | Runtime-quantize the DiT's ~400 Linears to FP8 e4m3fn with per-tensor absmax scaling after BF16 cold-load. PEFT-aware (LoRA stays BF16) | **–13% wall, ~50% DiT VRAM** (9.43 min vs 10.85 min BF16; ~14 GB vs ~28 GB on R2AIN 480×640×21×20) | Ships in 0.4.0. PSNR vs BF16 at production scale: albedo 30.89 dB, irradiance 39.17 dB, normal 36.28 dB, RGB exact. Speedup comes from fully-resident FP8 DiT avoiding `enable_vram_management`'s layer streaming. |
-| `vram_buffer_gb` | GB kept free for activations; passed to `model.pipe.enable_vram_management()` on UniVidX's WanVideoPipeline (text encoder + DiT + VAE layer streaming) | **+65% wall going 4.0 → 12.0** (10.36 → 17.10 min on R2AIN baseline 480×640×21×20, no sage/compile) | The biggest perf knob in the system — was mislabelled "deprecated, no-op" in 0.1.0–0.2.1 due to a misdiagnosis (see CHANGELOG). Lower = more layer residency = faster; raise only if you hit OOM. 4.0 GB default is near-optimal on 32 GB cards. Effectively a no-op when `dit_weight_mode=fp8_prequantized` because the FP8 DiT fits fully resident. |
+| Preset | Per-chunk | Full clip |
+|---|---|---|
+| PRODUCTION (BF16+sage) | 14.5 min | ~22 hours |
+| **FP8** | **9.4 min** | **~14 hours** ← production-quality |
+| FP8 PREVIEW (4 steps) | ~1.2 min* | **~1.8 hours** ← fastest reasonable |
 
-**Important: the two working knobs do NOT stack.** Both target the same per-step DiT bottleneck — combining them ran 14.99 min, *worse* than either alone. Pick one.
+*PREVIEW per-chunk wall includes cold-load; in-cache subsequent chunks are faster.
+
+Caveat: each chunk samples from its own noise seed (same seed across chunks, but the trajectory diverges anyway from per-chunk numerical drift), so global identity drift between chunks is possible on lighting-varying content. The overlap crossfade hides per-pixel seams but not global drift. For clips with consistent lighting throughout the minute, drift is minor; for clips with cuts or lighting changes, expect visible breath in the per-modality channels at chunk boundaries.
+
+## What stopped helping on Blackwell
+
+These knobs were useful in 0.2.0 / 0.3.0 but FP8 (0.4.0) is strictly better — leave them off unless you have a specific reason:
+
+- **`prefer_sage_attn=True`** — measured +33% wall on BF16 baseline, +25% on FP8 baseline. SageAttention's INT8 quantized kernels apparently don't win on Wan2.1-14B's attention shapes at this resolution. Earlier docs (0.2.0) advertised "−18% wall" — that measurement was on a different config; not reproducible on R2AIN_video as of 0.4.0.
+- **`compile_dit=True`** — measured +24% wall on FP8 baseline. `torch.compile` graph-captures cleanly on `FP8Linear` (good news, no crash) but the speedup it was designed to deliver doesn't materialize on top of FP8's already-resident state. Graph capture itself adds ~90 s overhead on first step.
+- **`dtype=fp8_e4m3fn` / `fp8_e5m2`** — **DEPRECATED, removed in 0.5.0.** The legacy `mmgp.offload.quantize` path hangs during cold-load. Use `dit_weight_mode=fp8_prequantized` instead.
+- **Flash Attention 3** — Hopper-only (H100/H800). Doesn't apply to RTX 5090.
+- **Flash Attention 4** — Linux-only on PyPI; module name (`flash_attn.cute`) doesn't match DiffSynth's auto-detect.
+
+## Other tuning knobs (Loader)
+
+These have non-trivial effects and are worth understanding:
+
+| Knob | Effect | Notes |
+|---|---|---|
+| `vram_buffer_gb` | GB kept free for activations; passed to `model.pipe.enable_vram_management()`. Controls layer-streaming aggressiveness on the BF16 path. | **+65% wall going 4.0 → 12.0** measured at BF16. Lower = more residency = faster; raise only if you hit OOM. 4.0 GB default is near-optimal on 32 GB cards. **Effectively no-op when `dit_weight_mode=fp8_prequantized`** because the FP8 DiT fits fully resident. |
+| `dit_weight_mode` | `auto / bf16_shards / fp8_prequantized / fp8_runtime_experimental`. `auto` (default) preserves 0.3.x behaviour based on the legacy `dtype` widget. | See "The 0.4.0 recommendation" above. |
 
 ### SageAttention install (for `prefer_sage_attn=True`)
 

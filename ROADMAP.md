@@ -17,36 +17,31 @@ What's shipped on `origin/main`:
 | Tier B7 (Phase 2 `_scaled_mm`) | **deferred** | Phase 1 already delivered the speedup; only worth doing if profiling shows dequant is the bottleneck |
 | Tier B file-based FP8 path | **dormant — auto-enables when a Kijai `_scaled` Wan2.1 file lands upstream** | Code retained at `src/fp8_loader.py:load_fp8_state_dict_into`; runtime resolver looks for `Wan2_1-T2V-14B_fp8_e4m3fn_scaled.safetensors` |
 
-## Immediate — close `0.4.0` final
+## Status — 0.4.0 final (2026-05-11)
 
-Bench coverage for 0.4.0-rc1 was one config (BF16 vs FP8 baseline,
-no sage / no compile). Before tagging final we want production
-confidence across the stack interactions:
+All six close-out validation matrix conditions measured. See CHANGELOG
+`0.4.0` section for the headline + the full table. Tagged + pushed.
 
-- [ ] **Re-bench BF16 PRODUCTION** preset (`prefer_sage_attn=True`,
-      20 steps) — the existing README claims 14.5 min but Tier-B
-      bench showed BF16-no-sage at 10.85 min. The implied "sage
-      slows things down by 3.65 min" needs to be either confirmed
-      (and reflected in the docs) or refuted (and the stale 14.5
-      number replaced).
-- [ ] **FP8 + `prefer_sage_attn=True`** — does the attention patch
-      chain compose cleanly with the FP8Linear forward? Quality?
-      Perf delta vs FP8-no-sage?
-- [ ] **FP8 + `compile_dit=True`** — does `torch.compile` graph-
-      capture handle the FP8 storage + dequant correctly? Or does
-      it fall through to eager?
-- [ ] **Alpha variant** (R2PFB workflow) with FP8 — alpha-matte
-      decomposition is a different code path than RGB intrinsic.
-- [ ] **PREVIEW preset** (4 steps + cfg=1) with FP8 — short-step
-      diffusion amplifies per-step numerical perturbations
-      chaotically (see CHANGELOG 0.4.0-rc1 lesson). Worth measuring
-      because PREVIEW is heavily used for iteration.
-- [ ] **Text-only mode** (t2RAIN) with FP8 — no RGB cross-conditioning,
-      different attention pattern than the conditioned modes.
+Key findings that update prior docs:
 
-Once those land cleanly in the perf-table:
+- [x] **BF16+sage = 14.48 min** — validates the original "~14.5 min"
+      claim; the README was correct, not stale.
+- [x] **`prefer_sage_attn=True` is +33% wall on R2AIN_video** — the
+      0.2.0 perf-table's "−18%" was on a different config. **Sage
+      now hurts on R2AIN-style workloads.**
+- [x] **FP8 + sage = 11.75 min** (sage adds +25% on top of FP8 baseline).
+- [x] **FP8 + compile_dit = 11.65 min** (compile adds +24% on top of
+      FP8 baseline). Graph-captures cleanly on FP8Linear; doesn't
+      help.
+- [x] **FP8 alpha variant = 12.36 min** — works, slightly slower
+      than intrinsic.
+- [x] **FP8 PREVIEW + sage = 6.20 min** (cold-load dominates short
+      sample run).
+- [x] **FP8 text-only tiny = 4.66 min** — smoke-test config.
 
-- [ ] Tag `0.4.0` final, push tag.
+The 0.4.0 release notes now lead with "just set
+`dit_weight_mode=fp8_prequantized`, leave everything else default"
+because that's the empirically best configuration on this hardware.
 
 ## Next milestone candidates — `0.5.0`
 
