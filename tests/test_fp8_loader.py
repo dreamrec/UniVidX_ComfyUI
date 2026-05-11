@@ -305,6 +305,79 @@ def test_load_fp8_state_dict_into_descends_into_peft_wrappers():
     assert report["fp8_linears_replaced"] == 2
 
 
+def test_quantize_dit_inplace_replaces_linears_with_scaled_fp8():
+    """Tier-B6 pivot: compute per-tensor absmax scales from the
+    existing BF16 Linear weights and replace each with an FP8Linear.
+    Quality near-lossless because the scale preserves the dynamic
+    range; FP8 stores only the *normalized* value with full FP8
+    mantissa precision."""
+    from src.fp8_loader import FP8Linear, quantize_dit_inplace
+
+    model = _TinyTarget()
+    # Set a recognizable BF16 weight on the q projection so we can
+    # confirm the scale survives the round-trip approximately.
+    q_old = model.blocks[0].cross_attn.q
+    # Make weights span [-2.0, +2.0] so the absmax scale is 2.0/448.
+    q_old.weight.data = (torch.linspace(-2.0, 2.0, q_old.in_features * q_old.out_features,
+                                          dtype=torch.bfloat16)
+                          .view(q_old.out_features, q_old.in_features))
+
+    report = quantize_dit_inplace(model)
+
+    q_new = model.blocks[0].cross_attn.q
+    assert isinstance(q_new, FP8Linear)
+    assert q_new.weight.dtype == torch.float8_e4m3fn
+    # Scale should be approximately absmax/448 = 2.0/448
+    expected_scale = 2.0 / 448.0
+    actual_scale = q_new.scale_weight.item()
+    assert abs(actual_scale - expected_scale) / expected_scale < 0.05, (
+        f"scale={actual_scale:.5f} differs from expected {expected_scale:.5f} "
+        f"by more than 5%"
+    )
+    # Dequant should approximately recover the original BF16 weight
+    # (within FP8 quantization noise, ~3-5% rms).
+    w_dq = q_new.weight.to(torch.bfloat16) * q_new.scale_weight.to(torch.bfloat16)
+    orig = q_old.weight.data  # cached reference (q_old still holds it)
+    rel_err = ((w_dq - orig).abs() / orig.abs().clamp_min(1e-6)).mean().item()
+    assert rel_err < 0.15, (
+        f"dequant rel err {rel_err:.3f} too high; expected < 0.15"
+    )
+    assert report["linears_quantized"] >= 2  # cross_attn.q + cross_attn.k
+
+
+def test_quantize_dit_inplace_descends_into_peft_wrappers():
+    """Same PEFT-descent contract as the file-based loader: replace
+    the BASE Linear inside a PEFT wrapper, leave the LoRA adapters
+    untouched in BF16."""
+    from src.fp8_loader import FP8Linear, quantize_dit_inplace
+
+    model = _TinyTarget()
+    inner_q = model.blocks[0].cross_attn.q
+
+    class _PEFTWrapper(nn.Module):
+        def __init__(self, base_layer):
+            super().__init__()
+            self.base_layer = base_layer
+            self.lora_A = nn.Linear(base_layer.in_features, 4, bias=False)
+            self.lora_B = nn.Linear(4, base_layer.out_features, bias=False)
+
+        def forward(self, x):
+            return self.base_layer(x) + self.lora_B(self.lora_A(x))
+
+    wrapper = _PEFTWrapper(inner_q)
+    model.blocks[0].cross_attn.q = wrapper
+    lora_A_before = wrapper.lora_A.weight.data.clone()
+
+    quantize_dit_inplace(model)
+
+    new_wrapper = model.blocks[0].cross_attn.q
+    assert isinstance(new_wrapper, _PEFTWrapper)
+    assert isinstance(new_wrapper.base_layer, FP8Linear)
+    assert torch.allclose(new_wrapper.lora_A.weight.data, lora_A_before), (
+        "LoRA adapters must survive quantize_dit_inplace untouched"
+    )
+
+
 def test_load_fp8_state_dict_into_warns_on_unmatched_keys(caplog):
     """If the Kijai state_dict has keys that don't match any module
     in the target model, the loader should log them — same as

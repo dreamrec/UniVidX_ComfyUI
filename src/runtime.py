@@ -274,50 +274,51 @@ def _resolve_fp8_weights_path() -> str:
 
 
 def _apply_fp8_substitution(model, variant: str) -> None:
-    """Tier B3: stream-load Kijai FP8 weights and replace the DiT's
-    nn.Linear modules with FP8Linear in-place.
+    """Tier B3 (post-B8 pivot): runtime-quantize the DiT's BF16 weights
+    to FP8 e4m3fn with per-tensor absmax scaling.
 
     Runs AFTER UniVidIntrinsic / UniVidAlpha __init__ completes
     (which constructs the WanModel, loads BF16 shards, AND wires
-    UniVidX's per-modality LoRA adapters via PEFT). The FP8 loader
+    UniVidX's per-modality LoRA adapters via PEFT). The quantizer
     descends through PEFT wrappers and replaces the BASE Linear only,
     so the LoRA stack stays BF16 (B5 contract).
 
-    Memory note: Phase 1 (B6) gives the steady-state VRAM win
-    (~28 GB BF16 DiT -> ~14 GB FP8 DiT) but still pays the BF16 cold
-    load peak in host RAM during model construction. Phase 2-or-later
-    work can intercept WanVideoPipeline.from_pretrained to skip the
-    BF16 shard load entirely.
-    """
-    from safetensors.torch import load_file as _load_safetensors
-    from .fp8_loader import load_fp8_state_dict_into
+    Design history: an earlier B3 design loaded Kijai's
+    `Wan2_1-T2V-14B_fp8_e4m3fn.safetensors` directly. That file ships
+    as a bare BF16->FP8 cast (no per-tensor scales) — tiny-scale PSNR
+    measurements showed 21-31 dB across modalities, well below
+    "near-lossless" threshold. No `_scaled` Wan2.1 variant exists
+    upstream as of writing. The pivot: compute per-tensor scales
+    ourselves from the cold-loaded BF16 weights, producing the same
+    quality the `_scaled` file would have offered, with no external
+    file dependency. See examples/_bench_fp8_tiny.py for the
+    measurements that drove this pivot. The file-based path
+    (load_fp8_state_dict_into) remains in src/fp8_loader.py for a
+    future opt-in if Kijai ships a Wan2.1 _scaled variant.
 
-    fp8_path = _resolve_fp8_weights_path()
-    _log.info("Loading Kijai FP8 base from %s", fp8_path)
-    fp8_sd = _load_safetensors(fp8_path)
-    try:
-        report = load_fp8_state_dict_into(model.pipe.dit, fp8_sd)
-    finally:
-        del fp8_sd  # release the temporary host-RAM dict
-        import gc as _gc
-        _gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    Memory: Phase 1 still pays the BF16 cold-load peak in host RAM,
+    but ends in ~14 GB FP8 steady-state VRAM instead of ~28 GB BF16.
+    """
+    from .fp8_loader import quantize_dit_inplace
+
+    _log.info("Quantizing DiT to FP8 e4m3fn (per-tensor absmax scaling)")
+    report = quantize_dit_inplace(model.pipe.dit)
+    import gc as _gc
+    _gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     _log.info(
-        "FP8 substitution complete: %d Linears -> FP8Linear, "
-        "%d aux loaded, %d unmatched",
-        report["fp8_linears_replaced"],
-        report["aux_keys_loaded"],
-        len(report["unmatched_keys"]),
+        "FP8 substitution complete: %d Linears quantized to FP8Linear "
+        "(per-tensor scaled)",
+        report["linears_quantized"],
     )
-    if report["fp8_linears_replaced"] == 0:
+    if report["linears_quantized"] == 0:
         _log.warning(
-            "FP8 substitution replaced 0 Linears — the file's key "
-            "convention may not match UniVidX's WanModel layout. "
-            "Sampling will run on whatever was already in the DiT "
-            "(probably the BF16 cold-load). Run "
-            "examples/_audit_kijai_fp8.py <path> to diagnose."
+            "FP8 substitution replaced 0 Linears — the DiT may not "
+            "contain any nn.Linear modules at the expected positions, "
+            "or PEFT wrapping made them unreachable via attribute "
+            "walk. Sampling will run at full BF16."
         )
 
 

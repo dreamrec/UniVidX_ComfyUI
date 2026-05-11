@@ -164,28 +164,29 @@ def test_dit_weight_mode_auto_with_legacy_fp8_routes_to_experimental(
 # Explicit overrides
 # ---------------------------------------------------------------------------
 
-def test_dit_weight_mode_fp8_prequantized_raises_when_weights_missing(
-        stub_runtime, monkeypatch, tmp_path):
-    """When the user picks fp8_prequantized but the Kijai
-    Wan2_1-T2V-14B_fp8_e4m3fn.safetensors file isn't on disk, the
-    loader must raise FileNotFoundError with a copy-pasteable
-    `hf download` command — not silently fall back to BF16 or hang."""
+def test_dit_weight_mode_fp8_prequantized_works_without_external_file(
+        stub_runtime, monkeypatch):
+    """Post-B8 pivot: fp8_prequantized runtime-quantizes the BF16
+    cold-load weights to FP8 with per-tensor absmax scaling. No
+    external Kijai file required (the upstream `_scaled` Wan2.1
+    variant doesn't exist; bare-cast variant produces poor quality).
+    Mock the substitution to verify wiring without a real model
+    load."""
     from src import runtime
-    # Point the resolver at a directory that definitely doesn't
-    # contain the file.
-    monkeypatch.setattr(runtime, "_comfy_root", lambda: str(tmp_path))
     from nodes.loader import UniVidXLoader
 
-    with pytest.raises(FileNotFoundError) as exc:
-        UniVidXLoader().load(variant="intrinsic", dtype="bfloat16",
-                              dit_weight_mode="fp8_prequantized")
-    msg = str(exc.value)
-    assert "Wan2_1-T2V-14B_fp8_e4m3fn.safetensors" in msg, (
-        f"error should name the expected filename: {exc.value!r}"
-    )
-    assert "hf download" in msg, (
-        f"error should include the download command: {exc.value!r}"
-    )
+    sub_calls: list[tuple] = []
+
+    def _fake_sub(model, variant):
+        sub_calls.append((type(model).__name__, variant))
+
+    monkeypatch.setattr(runtime, "_apply_fp8_substitution", _fake_sub)
+
+    # No FileNotFoundError; substitution runs.
+    UniVidXLoader().load(variant="intrinsic", dtype="bfloat16",
+                          dit_weight_mode="fp8_prequantized")
+    assert len(sub_calls) == 1
+    assert sub_calls[0][1] == "intrinsic"
 
 
 def test_dit_weight_mode_fp8_prequantized_invokes_substitution(
