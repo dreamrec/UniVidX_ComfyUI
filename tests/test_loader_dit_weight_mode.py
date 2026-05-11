@@ -164,20 +164,56 @@ def test_dit_weight_mode_auto_with_legacy_fp8_routes_to_experimental(
 # Explicit overrides
 # ---------------------------------------------------------------------------
 
-def test_dit_weight_mode_fp8_prequantized_not_yet_implemented(stub_runtime):
-    """dit_weight_mode='fp8_prequantized' is the B3 new path. Until
-    B3 lands, calling it must raise NotImplementedError with a
-    clear message (NOT silently fall back). Pins the contract so
-    B3 can flip the switch without renegotiating the API surface."""
+def test_dit_weight_mode_fp8_prequantized_raises_when_weights_missing(
+        stub_runtime, monkeypatch, tmp_path):
+    """When the user picks fp8_prequantized but the Kijai
+    Wan2_1-T2V-14B_fp8_e4m3fn.safetensors file isn't on disk, the
+    loader must raise FileNotFoundError with a copy-pasteable
+    `hf download` command — not silently fall back to BF16 or hang."""
+    from src import runtime
+    # Point the resolver at a directory that definitely doesn't
+    # contain the file.
+    monkeypatch.setattr(runtime, "_comfy_root", lambda: str(tmp_path))
     from nodes.loader import UniVidXLoader
 
-    with pytest.raises(NotImplementedError) as exc:
+    with pytest.raises(FileNotFoundError) as exc:
         UniVidXLoader().load(variant="intrinsic", dtype="bfloat16",
                               dit_weight_mode="fp8_prequantized")
-    msg = str(exc.value).lower()
-    assert "fp8_prequantized" in msg or "b3" in msg, (
-        f"NotImplementedError message should reference the mode/B3: {exc.value!r}"
+    msg = str(exc.value)
+    assert "Wan2_1-T2V-14B_fp8_e4m3fn.safetensors" in msg, (
+        f"error should name the expected filename: {exc.value!r}"
     )
+    assert "hf download" in msg, (
+        f"error should include the download command: {exc.value!r}"
+    )
+
+
+def test_dit_weight_mode_fp8_prequantized_invokes_substitution(
+        stub_runtime, monkeypatch):
+    """Happy path: when the FP8 file is on disk, load_model() calls
+    _apply_fp8_substitution to swap the DiT Linears with FP8Linear.
+    Mock the file-resolve + safetensors-load so this test doesn't
+    need a real 14 GB file."""
+    from src import runtime
+    from nodes.loader import UniVidXLoader
+
+    monkeypatch.setattr(runtime, "_resolve_fp8_weights_path",
+                        lambda: "/fake/Wan2_1-T2V-14B_fp8_e4m3fn.safetensors")
+
+    sub_calls: list[tuple] = []
+
+    def _fake_sub(model, variant):
+        sub_calls.append((type(model).__name__, variant))
+
+    monkeypatch.setattr(runtime, "_apply_fp8_substitution", _fake_sub)
+
+    UniVidXLoader().load(variant="intrinsic", dtype="bfloat16",
+                          dit_weight_mode="fp8_prequantized")
+    assert len(sub_calls) == 1, (
+        f"_apply_fp8_substitution should be invoked exactly once; "
+        f"got calls={sub_calls}"
+    )
+    assert sub_calls[0][1] == "intrinsic"
 
 
 def test_dit_weight_mode_bf16_shards_overrides_legacy_fp8_dtype(

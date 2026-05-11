@@ -234,11 +234,91 @@ def load_model(variant: str, *, device: str = "cuda", dtype: torch.dtype = torch
                     type(model).__name__,
                 )
 
+            if dit_weight_mode == "fp8_prequantized":
+                _apply_fp8_substitution(model, variant)
+
             if compile_dit:
                 _compile_dit(model)
 
         _MODEL_CACHE[cache_key] = model
         return model
+
+
+def _resolve_fp8_weights_path() -> str:
+    """Return the path to Kijai's pre-quantized Wan2.1-T2V-14B FP8
+    safetensors. Single file serves both intrinsic and alpha variants
+    (the FP8 weights are the Wan2.1 base; the per-variant LoRA stack
+    sits on top).
+
+    Raises FileNotFoundError with a copy-pasteable `hf download`
+    command if the file isn't present.
+    """
+    candidates = [
+        Path(_comfy_root()) / "models" / "diffusion_models"
+        / "Wan2_1-T2V-14B_fp8_e4m3fn.safetensors",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    raise FileNotFoundError(
+        "FP8 base weights for dit_weight_mode='fp8_prequantized' not "
+        "found. Expected at one of:\n"
+        + "\n".join(f"  - {p}" for p in candidates)
+        + "\n\nDownload via:\n"
+        "  hf download Kijai/WanVideo_comfy "
+        "Wan2_1-T2V-14B_fp8_e4m3fn.safetensors "
+        "--local-dir ComfyUI/models/diffusion_models\n\n"
+        "Alternatively set dit_weight_mode='bf16_shards' to keep the "
+        "0.3.0 BF16 cold-load path."
+    )
+
+
+def _apply_fp8_substitution(model, variant: str) -> None:
+    """Tier B3: stream-load Kijai FP8 weights and replace the DiT's
+    nn.Linear modules with FP8Linear in-place.
+
+    Runs AFTER UniVidIntrinsic / UniVidAlpha __init__ completes
+    (which constructs the WanModel, loads BF16 shards, AND wires
+    UniVidX's per-modality LoRA adapters via PEFT). The FP8 loader
+    descends through PEFT wrappers and replaces the BASE Linear only,
+    so the LoRA stack stays BF16 (B5 contract).
+
+    Memory note: Phase 1 (B6) gives the steady-state VRAM win
+    (~28 GB BF16 DiT -> ~14 GB FP8 DiT) but still pays the BF16 cold
+    load peak in host RAM during model construction. Phase 2-or-later
+    work can intercept WanVideoPipeline.from_pretrained to skip the
+    BF16 shard load entirely.
+    """
+    from safetensors.torch import load_file as _load_safetensors
+    from .fp8_loader import load_fp8_state_dict_into
+
+    fp8_path = _resolve_fp8_weights_path()
+    _log.info("Loading Kijai FP8 base from %s", fp8_path)
+    fp8_sd = _load_safetensors(fp8_path)
+    try:
+        report = load_fp8_state_dict_into(model.pipe.dit, fp8_sd)
+    finally:
+        del fp8_sd  # release the temporary host-RAM dict
+        import gc as _gc
+        _gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    _log.info(
+        "FP8 substitution complete: %d Linears -> FP8Linear, "
+        "%d aux loaded, %d unmatched",
+        report["fp8_linears_replaced"],
+        report["aux_keys_loaded"],
+        len(report["unmatched_keys"]),
+    )
+    if report["fp8_linears_replaced"] == 0:
+        _log.warning(
+            "FP8 substitution replaced 0 Linears — the file's key "
+            "convention may not match UniVidX's WanModel layout. "
+            "Sampling will run on whatever was already in the DiT "
+            "(probably the BF16 cold-load). Run "
+            "examples/_audit_kijai_fp8.py <path> to diagnose."
+        )
 
 
 def _patch_unividx_load_file_to_readonly() -> None:

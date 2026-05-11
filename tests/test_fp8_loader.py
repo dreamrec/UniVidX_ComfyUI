@@ -247,6 +247,64 @@ def test_load_fp8_state_dict_into_replaces_linears_with_fp8linear():
     assert report["aux_keys_loaded"] >= 1  # at least time_embedding
 
 
+def test_load_fp8_state_dict_into_descends_into_peft_wrappers():
+    """After UniVidX's add_multiple_loras_to_model, every target
+    Linear is wrapped in peft.tuners.lora.Linear with the original
+    nn.Linear hanging off `.base_layer`. The FP8 loader must descend
+    into the wrapper so it can replace the BASE layer (leaving the
+    LoRA adapters above it untouched and in BF16, per B5)."""
+    from src.fp8_loader import FP8Linear, load_fp8_state_dict_into
+
+    # Build a tiny model and PEFT-wrap one of its Linears.
+    model = _TinyTarget()
+    inner_q = model.blocks[0].cross_attn.q
+    assert isinstance(inner_q, nn.Linear)
+
+    # Stand-in PEFT-style wrapper: same surface area as
+    # peft.tuners.lora.Linear (has .base_layer, isn't a subclass of
+    # nn.Linear itself).
+    class _PEFTWrapper(nn.Module):
+        def __init__(self, base_layer):
+            super().__init__()
+            self.base_layer = base_layer
+            # LoRA-style adapters live alongside base_layer and must
+            # survive the FP8 substitution untouched.
+            self.lora_A = nn.Linear(base_layer.in_features, 4, bias=False)
+            self.lora_B = nn.Linear(4, base_layer.out_features, bias=False)
+
+        def forward(self, x):
+            return self.base_layer(x) + self.lora_B(self.lora_A(x))
+
+    wrapper = _PEFTWrapper(inner_q)
+    model.blocks[0].cross_attn.q = wrapper
+
+    # Snapshot LoRA weights so we can confirm they're untouched.
+    lora_A_before = wrapper.lora_A.weight.data.clone()
+
+    sd = _make_synthetic_kijai_sd()
+    report = load_fp8_state_dict_into(model, sd)
+
+    # The wrapper itself remains in place — only its base_layer
+    # changed identity (now FP8Linear, was nn.Linear).
+    new_wrapper = model.blocks[0].cross_attn.q
+    assert isinstance(new_wrapper, _PEFTWrapper), (
+        "PEFT wrapper must survive FP8 substitution"
+    )
+    assert isinstance(new_wrapper.base_layer, FP8Linear), (
+        "base_layer must have been replaced with FP8Linear"
+    )
+    assert new_wrapper.base_layer.weight.dtype == torch.float8_e4m3fn
+
+    # LoRA adapters preserved — this is the B5 contract.
+    assert torch.allclose(new_wrapper.lora_A.weight.data, lora_A_before), (
+        "lora_A weights must not be touched by FP8 substitution"
+    )
+
+    # Report still shows we replaced 2 Linears (the q via PEFT
+    # descent + the k via direct match).
+    assert report["fp8_linears_replaced"] == 2
+
+
 def test_load_fp8_state_dict_into_warns_on_unmatched_keys(caplog):
     """If the Kijai state_dict has keys that don't match any module
     in the target model, the loader should log them — same as

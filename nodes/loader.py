@@ -161,17 +161,6 @@ class UniVidXLoader:
             quantize_fp8=None,
         )
 
-        if effective_mode == "fp8_prequantized":
-            # B3 implements the pre-quantized Kijai FP8 loader. Until
-            # that lands, refuse loudly so users (and the test suite)
-            # see a clear contract rather than a silent fallback.
-            raise NotImplementedError(
-                "dit_weight_mode='fp8_prequantized' is not yet implemented "
-                "(Tier B3 — pre-quantized Kijai FP8 loader pending). "
-                "Use dit_weight_mode='bf16_shards' or leave it on 'auto' "
-                "for now."
-            )
-
         if effective_mode == "fp8_runtime_experimental":
             # Legacy mmgp.offload.quantize path. Known to hang in cold
             # load on Wan2.1-14B + UniVidX LoRA stack (see CHANGELOG).
